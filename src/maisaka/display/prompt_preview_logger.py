@@ -98,9 +98,9 @@ class PromptPreviewLogger:
             finally:
                 hold_seconds = time.perf_counter() - acquired_at
                 cls._storage_operation = previous_operation
-                log = logger.warning if hold_seconds >= 0.5 else logger.debug
-                if not quiet or hold_seconds >= 0.5:
-                    log(f"存储锁操作结束: operation={operation} thread={thread_name} 持有={hold_seconds:.3f}s")
+                # 总耗时由外层操作告警，锁持有时间仅供诊断，避免重复告警。
+                if not quiet:
+                    logger.debug(f"存储锁操作结束: operation={operation} thread={thread_name} 持有={hold_seconds:.3f}s")
 
     @classmethod
     @contextmanager
@@ -220,7 +220,7 @@ class PromptPreviewLogger:
         with cls._timed_storage_lock("cleanup_orphan_images"):
             if not cls._IMAGE_DIR.exists():
                 return 0
-            with log_operation(logger, "preview.scan_image_candidates", directory=str(cls._IMAGE_DIR)) as stats:
+            with log_operation(logger, "preview.scan_image_candidates", warn_slow=False, directory=str(cls._IMAGE_DIR)) as stats:
                 candidates = [
                     path
                     for path in cls._IMAGE_DIR.iterdir()
@@ -239,7 +239,7 @@ class PromptPreviewLogger:
             cls._persist_image_index(force=True)
             deleted_count = 0
             deleted_bytes = 0
-            with log_operation(logger, "preview.delete_orphan_images", candidates=len(candidates)) as stats:
+            with log_operation(logger, "preview.delete_orphan_images", warn_slow=False, candidates=len(candidates)) as stats:
                 # 只删除专用预览缓存，绝不触碰聊天图片或表情原件。
                 for path in candidates:
                     if path.name in cls._previews_by_image:
@@ -261,8 +261,7 @@ class PromptPreviewLogger:
         """写入单个预览文件并执行超量清理。"""
 
         queue_seconds = time.perf_counter() - task.enqueued_at
-        log = logger.warning if queue_seconds >= 0.5 else logger.debug
-        log(
+        logger.debug(
             f"预览写入出队: path={task.file_path} 排队={queue_seconds:.3f}s "
             f"剩余队列={cls._write_queue.qsize()}"
         )
@@ -400,7 +399,7 @@ class PromptPreviewLogger:
     def _load_image_index(cls) -> None:
         cache_path = cls._BASE_DIR / ".image-reference-index.sqlite3"
         if cache_path.exists():
-            with log_operation(logger, "preview.load_image_index", report=True, path=str(cache_path)) as stats:
+            with log_operation(logger, "preview.load_image_index", warn_slow=False, path=str(cache_path)) as stats:
                 # 图片清理只需有引用的记录；无图片日志留在数据库，不逐条构造内存对象。
                 # 引用记录的格式/内容损坏时明确报错，不能依据不完整缓存清理图片。
                 with closing(sqlite3.connect(cache_path)) as connection:

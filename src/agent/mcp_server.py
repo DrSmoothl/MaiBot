@@ -1,7 +1,7 @@
 """向外部 Agent 提供麦麦工具；临时 HTTP 端口仅监听本机并使用独立令牌。"""
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 from mcp import types
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
@@ -18,42 +18,52 @@ import secrets
 import socket
 import uvicorn
 
-from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolInvocation
-
-if TYPE_CHECKING:
-    from .acp_agent import AcpAgent
+from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolInvocation, ToolProvider, ToolRegistry
 
 
-class AgentMCPServer:
-    def __init__(self, agent: "AcpAgent") -> None:
-        self.agent = agent
+class ToolMCPServer:
+    def __init__(
+        self, providers: Sequence[ToolProvider], session_id: str, timeout: float, *, port: int = 0,
+    ) -> None:
+        self.registry = ToolRegistry()
+        for provider in providers:
+            self.registry.register_provider(provider)
+        self.session_id = session_id
+        self.timeout = timeout
         self.token = secrets.token_urlsafe(32)
         self.url = ""
+        self.port: Optional[int] = None
+        self._bind_port = port
         self.server: Optional[uvicorn.Server] = None
         self.task: Optional[asyncio.Task[None]] = None
 
     async def start(self) -> Dict[str, Any]:
-        from .provider import AgentToolProvider
-
-        provider = AgentToolProvider(self.agent.service)
+        provider = self.registry
         server = Server("maibot-agent")
 
         @server.list_tools()
         async def list_tools() -> List[types.Tool]:
-            specs = await provider.list_tools(ToolAvailabilityContext(session_id=self.agent.service.agent_id))
+            specs = await provider.list_tools(ToolAvailabilityContext(session_id=self.session_id))
             return [types.Tool(name=spec.name, description=spec.description, inputSchema=spec.parameters_schema) for spec in specs]
 
         @server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> types.CallToolResult:
-            result = await provider.invoke(ToolInvocation(name, arguments), ToolExecutionContext(session_id=self.agent.service.agent_id))
+            result = await provider.invoke(
+                ToolInvocation(name, arguments), ToolExecutionContext(session_id=self.session_id),
+            )
             content = [types.TextContent(type="text", text=result.get_history_content())]
             content.extend(types.ImageContent(type="image", data=item.data, mimeType=item.mime_type)
                            for item in result.content_items if item.content_type == "image")
             return types.CallToolResult(content=content, isError=not result.success)
 
         sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
+        try:
+            sock.bind(("127.0.0.1", self._bind_port))
+        except BaseException:
+            sock.close()
+            raise
         port = sock.getsockname()[1]
+        self.port = port
         self.url = f"http://127.0.0.1:{port}/mcp"
         manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True, security_settings=TransportSecuritySettings(
             enable_dns_rebinding_protection=True, allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[],
@@ -88,7 +98,7 @@ class AgentMCPServer:
                         await self.task
                         raise RuntimeError("外接 Agent MCP 服务未能启动")
                     await asyncio.sleep(0.01)
-            await asyncio.wait_for(ready(), self.agent.config.acp_timeout)
+            await asyncio.wait_for(ready(), self.timeout)
         except BaseException:
             await self.close()
             sock.close()
@@ -101,7 +111,7 @@ class AgentMCPServer:
             self.server.should_exit = True
         if self.task is not None:
             try:
-                await asyncio.wait_for(asyncio.shield(self.task), min(self.agent.config.acp_timeout, 1))
+                await asyncio.wait_for(asyncio.shield(self.task), min(self.timeout, 1))
             except asyncio.TimeoutError:
                 self.task.cancel()
                 try:

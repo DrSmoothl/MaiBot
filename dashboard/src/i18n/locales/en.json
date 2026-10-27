@@ -138,6 +138,7 @@
     },
     "sections": {
       "breakdowns": "Breakdowns",
+      "embeddings": "Embedding statistics",
       "distributions": "Distributions"
     },
     "breakdowns": {
@@ -179,8 +180,7 @@
       "cacheMissTokens": "Cache miss tokens",
       "cacheHitRate": "Cache hit rate",
       "cost": "Total cost",
-      "avgTime": "Average time",
-      "stdTime": "Time deviation",
+      "time": "Time",
       "callsPerReply": "Calls per reply",
       "tokensPerReply": "Tokens per reply",
       "tokensPerCall": "Tokens per call",
@@ -256,12 +256,13 @@
       "resting": "Resting",
       "autonomous": "Exploring",
       "running": "Operation running",
-      "pause": "Pause decisions",
+      "pause": "Pause computer input",
       "takeover": "Take control",
-      "resume": "Return control",
+      "resume": "Resume",
       "stop": "Stop sandbox",
+      "restart": "Rebuild sandbox",
       "refresh": "Refresh",
-      "help": "Desktop screenshots update continuously. Take control to click, right-click and type. Taking control requests cancellation; pausing decisions leaves submitted operations running.",
+      "help": "The internal Planner, sub-agents and external Agent share this computer. Take control to click, right-click and type. Taking control cancels in-flight operations and blocks autonomous input; pausing input leaves submitted operations running.",
       "screen": "Computer desktop",
       "text": "Type after taking control",
       "type": "Type text",
@@ -1788,5 +1789,49 @@
     "mobileTextEmpty": "Empty",
     "mobileTextCancel": "Cancel",
     "mobileTextDone": "Done"
+  },
+  "dataManagement": {
+    "transfer": "Backup & Cache"
+  },
+  "files": {
+    "disabled": "File capabilities are disabled. Enable them in Capabilities.",
+    "openSettings": "Open capability settings",
+    "title": "Files",
+    "description": "Files belong to chats and download on demand. Preview text; uploaded and generated originals remain until manually deleted.",
+    "storage": "Used",
+    "reserved": "Reserved",
+    "maximum": "File limit",
+    "chat": "Chat",
+    "allChats": "All chats",
+    "refresh": "Refresh",
+    "upload": "Upload file",
+    "chooseChat": "Choose a chat before uploading.",
+    "download": "Download",
+    "read": "Read text",
+    "sendTo": "Send to chat…",
+    "confirmSend": "Send this file to “{{name}}”?",
+    "clearCache": "Clear cache",
+    "delete": "Delete",
+    "confirmDelete": "Delete “{{name}}”? Local originals cannot be recovered.",
+    "empty": "No attachments",
+    "previous": "Previous",
+    "next": "Next",
+    "encoding": "Encoding",
+    "close": "Close",
+    "remote": "Platform cache",
+    "original": "Local original",
+    "removeAttachment": "Remove attachment from draft (original stays in Files)",
+    "uploadFailed": "File upload failed",
+    "state": {
+      "remote": "Not downloaded",
+      "ready": "Ready",
+      "failed": "Failed",
+      "uploading": "Uploading",
+      "downloading": "Downloading"
+    },
+    "delivery": {
+      "sent": "File sent",
+      "unknown": "Delivery is uncertain. Check the chat before retrying."
+    }
   }
 }

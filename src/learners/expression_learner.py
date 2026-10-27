@@ -1,3 +1,4 @@
+from copy import copy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple
@@ -11,6 +12,7 @@ from src.chat.replyer.expression_vector_index import ExpressionVectorIndexUpsert
 from src.chat.utils.utils import is_bot_self
 from src.common.data_models.expression_data_model import MaiExpression
 from src.common.data_models.llm_service_data_models import LLMResponseResult
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
@@ -25,6 +27,7 @@ from src.services.llm_service import LLMServiceClient
 from .expression_review_store import append_ai_review_log
 from .expression_style_utils import normalize_expression_style_for_learning
 from .expression_utils import check_expression_suitability, parse_expression_response
+from .learning_text import extract_learning_text
 from .pending_learning_buffer import PendingLearningBuffer
 
 if TYPE_CHECKING:
@@ -400,6 +403,7 @@ class ExpressionLearner:
     ) -> bool:
         """执行已经获得并发闸门的表达学习批次。"""
 
+        pending_messages = self._prepare_learning_messages(pending_messages)
         readable_message = "聊天记录将在后续多条 user message 中给出；请以每条消息中的 id 作为来源行编号。"
         prompt_template = prompt_manager.get_prompt("learn_style")
         prompt_template.add_context("bot_name", global_config.bot.nickname)
@@ -408,6 +412,9 @@ class ExpressionLearner:
 
         try:
             learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
+            if len(learning_messages) == 2:
+                self.learning_status, self.learning_detail = "no_results", "没有可学习的文字正文"
+                return False
             generation_result = await express_learn_model.generate_response_with_context(
                 lambda _client: learning_messages,
                 session_id=learning_session_id,
@@ -556,12 +563,27 @@ class ExpressionLearner:
         )
         return None
 
+    @staticmethod
+    def _prepare_learning_messages(messages: List["SessionMessage"]) -> List["SessionMessage"]:
+        """为学习创建仅含顶层文字的消息副本，不解析其他组件。"""
+
+        learning_messages: List["SessionMessage"] = []
+        for message in messages:
+            # 仅白名单文字组件，引用、转发、图片描述和语音转写都不作为学习正文。
+            text = extract_learning_text(message.raw_message)
+            # 不改写聊天上下文中的原始组件或完整文本；请求构建与来源过滤共用这些副本。
+            learning_message = copy(message)
+            learning_message.raw_message = MessageSequence([TextComponent(text)] if text else [])
+            learning_message.processed_plain_text = text
+            learning_messages.append(learning_message)
+        return learning_messages
+
     async def _build_multi_learning_messages(
         self,
         messages: List["SessionMessage"],
         system_prompt: str,
     ) -> List[ContextItem]:
-        """构造表达学习使用的多 message 请求。"""
+        """从已准备的纯文字副本构造学习请求，不触发识图或其他消息处理。"""
 
         learning_messages = [
             ContextItemBuilder()
@@ -575,13 +597,13 @@ class ExpressionLearner:
         ]
 
         for index, message in enumerate(messages, start=1):
-            await message.process()
             user_info = message.message_info.user_info
             speaker_name = user_info.user_cardname or user_info.user_nickname or "未知用户"
             speaker_kind = "SELF" if is_bot_self(message.platform, user_info.user_id) else "USER"
             content = (message.processed_plain_text or "").strip()
             if not content:
-                content = "[空消息]"
+                # 跳过空素材但保留原始编号，避免后置来源过滤对应到其他消息。
+                continue
             learning_messages.append(
                 ContextItemBuilder()
                 .set_role(RoleType.User)
@@ -675,6 +697,13 @@ class ExpressionLearner:
             current_msg = messages[line_index]
             # 过滤掉从 bot 自己发言中提取到的表达方式
             if is_bot_self(current_msg.platform, current_msg.message_info.user_info.user_id):
+                continue
+            # 按真实来源消息匹配黑名单，保留其他消息的学习及上下文。
+            if any(
+                user.platform == current_msg.platform
+                and user.user_id == current_msg.message_info.user_info.user_id
+                for user in global_config.expression.learning_blacklist
+            ):
                 continue
             # 过滤掉无上下文的表达方式
             context = (current_msg.processed_plain_text or "").strip()

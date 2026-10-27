@@ -7,6 +7,7 @@ import asyncio
 import json
 
 from src.common.data_models.llm_service_data_models import LLMResponseResult
+from src.agent.planner import ACPPlannerSnapshot, generate_planner_response
 from src.common.data_models.message_component_data_model import ReplyComponent
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
@@ -131,7 +132,7 @@ def message_text_for_compaction(message: LLMContextMessage) -> str:
 class PlannerRequestSnapshot:
     """实际成功的 Planner 请求及其已覆盖的历史对象，仅驻留内存。"""
 
-    request: ResponseRequest
+    request: ResponseRequest | ACPPlannerSnapshot
     history: Tuple[LLMContextMessage, ...]
 
 
@@ -179,7 +180,7 @@ def _build_compaction_request(
     recent_messages: Sequence[LLMContextMessage],
     max_summary_chars: int,
     source_context: str = "",
-) -> ResponseRequest:
+) -> ResponseRequest | ACPPlannerSnapshot:
     """在线程池构造完整请求，序列化大工具结果和复制图片不占事件循环。"""
     if not removed_messages:
         raise ValueError("没有可压缩的历史内容")
@@ -207,7 +208,7 @@ def _build_compaction_request(
     tail = "\n".join([*tail_parts, instruction])
     request = planner_snapshot.request.detached_snapshot()
     request.context_items.append(ContextItemBuilder().set_role(RoleType.User).add_text_content(tail).build())
-    # 工具定义、顺序和调用模式都会影响供应商实际渲染的前缀，全部继承 Planner。
+    # 原生请求的工具定义、顺序和调用模式会影响前缀，全部继承 Planner；ACP 摘要不挂载工具。
     # 压缩仅消费摘要文本，不进入宿主工具执行流程；含工具调用的响应会被拒收。
     return request
 
@@ -228,8 +229,13 @@ async def build_context_summary(
         previous_summary=previous_summary, recent_messages=recent_messages,
         max_summary_chars=max_summary_chars, source_context=source_context,
     )
-    client = LLMServiceClient(task_name="planner", request_type="maisaka.context_compaction", session_id=session_id)
-    result = await client.generate_response_from_snapshot(request)
+    if isinstance(request, ACPPlannerSnapshot):
+        result = await generate_planner_response(
+            request.config, session_id, request.context_items, [], history_item_ids=request.history_item_ids,
+        )
+    else:
+        client = LLMServiceClient(task_name="planner", request_type="maisaka.context_compaction", session_id=session_id)
+        result = await client.generate_response_from_snapshot(request)
     try:
         await asyncio.to_thread(
             save_compaction_prompt_preview, request.context_items, result=result, session_id=session_id,

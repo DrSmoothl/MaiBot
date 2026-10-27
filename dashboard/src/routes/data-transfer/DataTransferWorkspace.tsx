@@ -1,4 +1,5 @@
 import { Box, Download, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,7 +36,10 @@ const importOptions: {
 ]
 
 /** 生产页面和设计预览使用同一棵展示组件，数据来源由外部提供。 */
-export function DataTransferWorkspace({ viewModel: model }: { viewModel: DataTransferViewModel }) {
+export function DataTransferWorkspace({ viewModel: model, headerActions }: {
+  viewModel: DataTransferViewModel
+  headerActions?: ReactNode
+}) {
   const exporting = model.exportCreating || isTransferJobRunning(model.exportJob)
   const importing = model.importUploading || isTransferJobRunning(model.importJob)
   const exportSelectedCount = 1 + Object.values(model.exportOptions).filter(Boolean).length
@@ -44,7 +48,10 @@ export function DataTransferWorkspace({ viewModel: model }: { viewModel: DataTra
   return (
     <div className="space-y-5">
       <header className="space-y-1">
-        <h1 className="text-2xl font-normal">数据导入导出</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="min-w-0 text-2xl font-normal">数据导入导出</h1>
+          {headerActions}
+        </div>
         <p className="text-muted-foreground text-sm">
           备份或迁移 MaiBot：config 与 data 默认包含，插件和日志按需选择
         </p>

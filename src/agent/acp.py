@@ -1,7 +1,7 @@
 """ACP v1 的双向 NDJSON 连接，支持子进程 stdio 和 Desktop 本机桥接。"""
 
 from collections import deque
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import asyncio
@@ -9,6 +9,37 @@ import json
 import os
 import shutil
 import subprocess
+
+from src.common.logger import get_logger
+
+from .config import AgentConfig
+
+logger = get_logger("agent.acp")
+
+
+def session_cwd(config: AgentConfig, local_cwd: Path) -> str:
+    """远端路径不能经过本机的 resolve/expanduser，也不能在本机 mkdir。"""
+    remote = config.acp_remote_cwd
+    if not remote:
+        return str(local_cwd)
+    if config.connection == "dsh":
+        raise ValueError("ACP 远程会话工作目录仅适用于自定义 ACP 或 Desktop 隧道连接")
+    if not (PurePosixPath(remote).is_absolute() or PureWindowsPath(remote).is_absolute()):
+        raise ValueError("ACP 远程会话工作目录必须是远端已存在的绝对路径，不能使用 ~ 或相对路径")
+    return remote
+
+
+def desktop_manifest(config: AgentConfig) -> Path:
+    return (Path(config.desktop_manifest).expanduser() if config.desktop_manifest
+            else Path.home() / ".dsh" / "maibot-desktop.json").absolute()
+
+
+class ACPRequestError(RuntimeError):
+    """对端已返回请求错误，与断线或超时导致的结果未知区分。"""
+
+    def __init__(self, error: Dict[str, Any]) -> None:
+        self.error = error
+        super().__init__("ACP: " + json.dumps(error, ensure_ascii=False))
 
 
 class ACPConnection:
@@ -25,13 +56,58 @@ class ACPConnection:
         self._write_lock = asyncio.Lock()
         self.failure: Optional[Exception] = None
 
+    async def initialize(
+        self, config: AgentConfig, cwd: Path, client_name: str, *, mcp_port: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """两种 ACP 使用方共用连接选择和握手，业务状态由各自保存。"""
+        if config.connection == "dsh_desktop":
+            await self.connect_desktop(desktop_manifest(config), config.acp_timeout)
+        else:
+            args = ["--profile", "acp"] if config.connection == "dsh" else config.acp_args
+            if any("{mcp_port}" in arg for arg in args):
+                if mcp_port is None:
+                    raise ValueError("ACP 启动参数使用了 {mcp_port}，但工具服务尚未启动")
+                # 仅替换已知占位符，保留远端命令中其他 JSON/shell 花括号。
+                args = [arg.replace("{mcp_port}", str(mcp_port)) for arg in args]
+            await self.start(config.acp_command, args, str(cwd), config.acp_env)
+        initialized = await self.request("initialize", {
+            "protocolVersion": 1, "clientInfo": {"name": client_name, "version": "1"},
+            "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
+        }, config.acp_timeout)
+        if initialized["protocolVersion"] != 1:
+            raise ValueError("外部 Agent 未协商 ACP v1")
+        capabilities = initialized["agentCapabilities"]
+        if not capabilities.get("mcpCapabilities", {}).get("http", False):
+            raise ValueError("外部 Agent 未声明 HTTP MCP 能力，无法挂载麦麦工具")
+        return capabilities
+
+    async def open_session(
+        self, cwd: str, mount: Dict[str, Any], session_id: Optional[str], timeout: float,
+    ) -> Dict[str, Any]:
+        params = {"cwd": str(cwd), "mcpServers": [mount]}
+        if session_id:
+            params["sessionId"] = session_id
+        return await self.request("session/resume" if session_id else "session/new", params, timeout)
+
+    async def select_model(
+        self, config: AgentConfig, session: Dict[str, Any], session_id: str,
+    ) -> None:
+        if not config.acp_model:
+            return
+        if not any(option["id"] == "model" for option in session.get("configOptions", [])):
+            raise ValueError("外部 Agent 未提供 model 配置选项")
+        await self.request("session/set_config_option", {
+            "sessionId": session_id, "configId": "model", "value": config.acp_model,
+        }, config.acp_timeout)
+
     async def start(self, command: str, args: List[str], cwd: str, env: Dict[str, str]) -> None:
-        executable = shutil.which(command)
+        process_env = {**os.environ, **env}
+        executable = await asyncio.to_thread(shutil.which, command, path=process_env.get("PATH"))
         if executable is None:
             raise FileNotFoundError(f"找不到 ACP 启动程序：{command}")
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
         self.process = await asyncio.create_subprocess_exec(
-            executable, *args, cwd=cwd, env={**os.environ, **env}, stdin=asyncio.subprocess.PIPE,
+            executable, *args, cwd=cwd, env=process_env, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=64 * 1024 * 1024, **options,
         )
         self.stdout, self.stdin = self.process.stdout, self.process.stdin
@@ -41,7 +117,7 @@ class ACPConnection:
     async def connect_desktop(self, manifest: Path, timeout: float) -> None:
         def read_manifest() -> Dict[str, Any]:
             if not manifest.is_file():
-                raise FileNotFoundError("未找到 dsh Desktop 桥接信息；请安装 dsh-maibot-bridge 插件并启动 Desktop。")
+                raise FileNotFoundError("未找到 dsh Desktop 桥接信息；请安装 dsh-maibot-bridge 插件并启动 Desktop。普通 dsh CLI 无需桥接插件，可选择 dsh CLI 连接；详见 docs/agent-connections.md。")
             return json.loads(manifest.read_text(encoding="utf-8"))
 
         info = await asyncio.to_thread(read_manifest)
@@ -84,7 +160,8 @@ class ACPConnection:
             try:
                 return await asyncio.wait_for(asyncio.shield(future), timeout)
             except asyncio.TimeoutError:
-                raise TimeoutError(f"ACP {method} 超时（{timeout} 秒），请求未重试") from None
+                details = "\n外部进程 stderr：\n" + "\n".join(self._errors) if self._errors else ""
+                raise TimeoutError(f"ACP {method} 超时（{timeout} 秒），请求未重试{details}") from None
         finally:
             self._pending.pop(request_id, None)
             if not future.done():
@@ -92,7 +169,9 @@ class ACPConnection:
 
     async def _read_errors(self) -> None:
         while line := await self.process.stderr.readline():
-            self._errors.append(line.decode("utf-8", errors="replace").rstrip())
+            text = line.decode("utf-8", errors="replace").rstrip()
+            self._errors.append(text)
+            logger.info("ACP stderr: %s", text)
 
     async def _read(self) -> None:
         try:
@@ -112,7 +191,7 @@ class ACPConnection:
                     future = self._pending[message["id"]]
                     if not future.done():
                         if "error" in message:
-                            future.set_exception(RuntimeError("ACP: " + json.dumps(message["error"], ensure_ascii=False)))
+                            future.set_exception(ACPRequestError(message["error"]))
                         else:
                             future.set_result(message["result"])
             raise ConnectionError("ACP 连接已关闭\n" + "\n".join(self._errors))

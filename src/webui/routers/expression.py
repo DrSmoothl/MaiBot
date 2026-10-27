@@ -251,7 +251,8 @@ class ExpressionExportItem(BaseModel):
 class ExpressionExportRequest(BaseModel):
     """表达方式导出请求。"""
 
-    chat_id: str
+    chat_id: Optional[str] = None
+    chat_ids: Optional[List[str]] = None
     ids: Optional[List[int]] = None
 
 
@@ -1394,13 +1395,17 @@ def get_expression_list(
 
 @router.post("/export", response_model=ExpressionExportResponse)
 def export_expressions(request: ExpressionExportRequest) -> ExpressionExportResponse:
-    """按单个聊天流导出表达方式，导出内容不包含 session_id。"""
+    """按所选记录、聊天范围或全部导出表达方式，导出内容不包含 session_id。"""
 
     try:
-        chat_id = require_non_empty_chat_id(request.chat_id)
+        chat_id = require_non_empty_chat_id(request.chat_id) if request.chat_id is not None else None
 
-        statement = select(Expression).where(col(Expression.session_id) == chat_id)
-        if request.ids:
+        statement = select(Expression)
+        if chat_id is not None:
+            statement = statement.where(col(Expression.session_id) == chat_id)
+        if request.chat_ids is not None:
+            statement = statement.where(col(Expression.session_id).in_(request.chat_ids))
+        if request.ids is not None:
             statement = statement.where(col(Expression.id).in_(request.ids))
         statement = statement.order_by(
             case((col(Expression.last_active_time).is_(None), 1), else_=0),
@@ -1412,10 +1417,10 @@ def export_expressions(request: ExpressionExportRequest) -> ExpressionExportResp
             if request.ids and len(expressions) != len(set(request.ids)):
                 found_ids = {expression.id for expression in expressions}
                 missing_ids = sorted(set(request.ids) - found_ids)
-                raise HTTPException(status_code=400, detail=f"部分表达方式不属于该聊天或不存在: {missing_ids}")
+                raise HTTPException(status_code=400, detail=f"部分表达方式不属于所选范围或不存在: {missing_ids}")
 
             items = [expression_to_export_item(expression) for expression in expressions]
-            chat_name = get_chat_name(chat_id, session)
+            chat_name = get_chat_name(chat_id, session) if chat_id is not None else ""
 
         return ExpressionExportResponse(
             exported_at=datetime.now().isoformat(),

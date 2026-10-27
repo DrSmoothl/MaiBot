@@ -17,6 +17,7 @@ import { type ReactNode, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { LearningExportDialog } from '@/components/learning-export-dialog'
 import { LearningCreateDialog } from '@/components/learning-create-dialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,6 +38,7 @@ import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SwitchField } from '@/components/ui/switch'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName, formatChatTargetLabel } from '@/lib/chat-display'
@@ -45,6 +47,7 @@ import { cn } from '@/lib/utils'
 import {
   batchDeleteExpressions,
   deleteExpression,
+  exportExpressions,
   getChatList,
   getExpressionDetail,
   getExpressionChatTargets,
@@ -118,6 +121,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   const [deleteConfirmExpression, setDeleteConfirmExpression] = useState<Expression | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false)
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
   const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false)
   // 手机上默认进入卡片审核，与设计稿一致；桌面端默认列表
   const isMobileViewport = useMediaQuery('(max-width: 1023.98px)')
@@ -220,17 +224,16 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   // 审核（单条 / 批量）：写成功后 invalidate 重新拉取（服务端为准）
   const { toggleReviewStatus, batchReviewStatus } = useExpressionReview({ onChanged: refreshAll })
 
-  // 当前选中的具体聊天（用于导入导出清除与作用域指示）
+  // 当前选中的具体聊天（用于导入清除与作用域指示）
   const currentChat =
     browseMode === 'chat' && selectedChatId
       ? (chatList.find((chat) => chat.chat_id === selectedChatId) ?? null)
       : null
 
-  // 导入 / 导出 / 清除：写成功后 invalidate 刷新
-  const { exportSelectedExpressionsToFile, handleImportFileChange, clearCurrentChat } =
+  // 导入 / 清除：写成功后 invalidate 刷新
+  const { handleImportFileChange, clearCurrentChat } =
     useExpressionImportExport({
       currentChat,
-      selectedIds: list.selectedIds,
       onChanged: refreshAll,
       onClearSelection: list.clearSelection,
       onCloseClearConfirm: () => setIsClearConfirmOpen(false),
@@ -347,6 +350,39 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-3 pb-4 sm:p-4">
+      {isExportDialogOpen && (
+        <LearningExportDialog
+          kind="expression"
+          selectedIds={list.selectedIds}
+          chats={chatList.map((chat) => ({
+            id: chat.chat_id,
+            name: formatChatDisplayName(chat.chat_name, chat.account_id),
+            targetId: chat.target_id,
+          }))}
+          groups={groups.map((group) => ({
+            id: group.index,
+            name: group.name,
+            chatIds: group.chat_ids,
+            isGlobal: group.is_global,
+            details: [
+              group.name,
+              group.is_global ? '全局共享组：包含全部聊天' : `包含 ${group.members.length} 个聊天`,
+              ...group.members.map((member) =>
+                [formatChatDisplayName(member.chat_name, member.account_id), formatChatTargetLabel(member)]
+                  .filter(Boolean).join(' · ')
+              ),
+            ].join('\n'),
+          }))}
+          loading={chatListQuery.isPending || groupsQuery.isPending}
+          error={chatListQuery.isError || groupsQuery.isError}
+          onRetry={() => {
+            void chatListQuery.refetch()
+            void groupsQuery.refetch()
+          }}
+          onBack={() => setIsExportDialogOpen(false)}
+          onExport={({ ids, chatIds }) => exportExpressions({ ids, chat_ids: chatIds })}
+        />
+      )}
       {activeView !== 'list' && (
         <div className="mb-4 flex shrink-0 justify-end gap-2 sm:mb-3">
           {/* 手机上由页头的「列表模式」返回，这里不再重复 */}
@@ -498,7 +534,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                       value={filters.sortBy}
                       onValueChange={(value: ExpressionFilters['sortBy']) => list.setFilter('sortBy', value)}
                     >
-                      <SelectTrigger className="h-8 w-[130px]" aria-label="表达方式排序">
+                      <SelectTrigger controlSize="sm" className="w-[130px]" aria-label="表达方式排序">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -508,29 +544,22 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                         <SelectItem value="created_asc">最早创建</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-pressed={reviewFilter === 'user_checked'}
-                      onClick={() =>
-                        list.setFilter(
-                          'reviewFilter',
-                          reviewFilter === 'user_checked' ? 'all' : 'user_checked'
-                        )
+                    <SwitchField
+                      controlSize="sm"
+                      label="仅精选"
+                      checked={reviewFilter === 'user_checked'}
+                      onCheckedChange={(checked) =>
+                        list.setFilter('reviewFilter', checked ? 'user_checked' : 'all')
                       }
-                    >
-                      <Star className="h-4 w-4" />
-                      仅精选
-                    </Button>
+                    />
                     <Button
                       variant="outline"
                       size="icon-sm"
-                      onClick={exportSelectedExpressionsToFile}
-                      disabled={!currentChat || list.selectedCount === 0}
-                      title="导出所选"
-                      aria-label="导出所选"
+                      onClick={() => setIsExportDialogOpen(true)}
+                      title="导出表达方式"
+                      aria-label="导出表达方式"
                     >
-                      <Download className="h-4 w-4" />
+                      <Upload className="h-4 w-4" />
                     </Button>
                     <Button
                       size="sm"
@@ -592,14 +621,14 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                           聚类
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => setIsLegacyImportOpen(true)}>
-                          <Upload className="mr-2 h-4 w-4" />
+                          <Download className="mr-2 h-4 w-4" />
                           从旧版本导入
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           disabled={!currentChat}
                           onSelect={() => importInputRef.current?.click()}
                         >
-                          <Upload className="mr-2 h-4 w-4" />
+                          <Download className="mr-2 h-4 w-4" />
                           导入
                         </DropdownMenuItem>
                         <DropdownMenuItem

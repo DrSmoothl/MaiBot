@@ -634,6 +634,7 @@
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
+    [data-dashboard-switch-field='true'],
     [data-dashboard-date-time-trigger='true'],
     textarea:not([data-textarea-variant="composer"]),
     select:not(.opacity-0),

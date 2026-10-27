@@ -27,6 +27,8 @@ from src.common.message_repository import find_messages
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
 from src.config.config import global_config, model_config
 from src.agent.provider import AgentToolProvider
+from src.computer.provider import ComputerToolProvider
+from src.files.provider import FileToolProvider
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
@@ -37,7 +39,7 @@ from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
 from src.maisaka.context.clear_context import select_messages_after_latest_clear_marker
 from src.maisaka.context.history import drop_leading_orphan_tool_results
-from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases
+from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases, to_display_message_id
 from src.maisaka.context.messages import (
     ContentContextMessage,
     InternalContextMessage,
@@ -726,6 +728,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         if not self._running:
             raise RuntimeError("不能向已停止的聊天运行实例投递任务")
         task_id = f"{source_kind}:{uuid.uuid4().hex}"
+        if images:
+            # 内部传话没有 IM 消息头，显式给出真实附件的引用，不能让模型用传话 ID 猜工具媒体索引。
+            references = [{"msg_id": to_display_message_id(task_id), "index": index} for index in range(len(images))]
+            text += "\n[图片附件引用] attach_pic=" + json.dumps(references, ensure_ascii=False)
         self._chat_history.append(InternalContextMessage(
             raw_message=MessageSequence([TextComponent(text), *images]), visible_text=text,
             timestamp=datetime.now(), message_id=task_id, source_kind=source_kind,
@@ -1334,6 +1340,8 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         )
         self._tool_registry.register_provider(PluginToolProvider())
         self._tool_registry.register_provider(AgentToolProvider())
+        self._tool_registry.register_provider(ComputerToolProvider())
+        self._tool_registry.register_provider(FileToolProvider())
         self._tool_registry.register_provider(MCPToolProvider(get_mcp_service()))
         self._chat_loop_service.set_tool_registry(self._tool_registry)
 
@@ -1649,12 +1657,19 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             except TimeoutError:
                 pass
 
+    def _get_message_debounce_mode(self) -> Literal["off", "fast", "natural", "steady"]:
+        """按真实聊天流类型读取档位，使群聊和私聊的配置及热重载互不影响。"""
+        timing = global_config.chat.reply_timing
+        if self.chat_stream.is_group_session:
+            return timing.message_debounce_mode
+        return timing.private_message_debounce_mode
+
     def _is_message_debounce_enabled(self) -> bool:
-        return global_config.chat.reply_timing.message_debounce_mode != "off"
+        return self._get_message_debounce_mode() != "off"
 
     def _observe_message_debounce(self, message: SessionMessage, received_at: float) -> None:
         """在触发调度之前更新截止时间；开关热重载时清除旧批次。"""
-        mode = global_config.chat.reply_timing.message_debounce_mode
+        mode = self._get_message_debounce_mode()
         enabled = mode != "off"
         if enabled != self._message_debounce_was_enabled:
             self._fixed_message_debouncer.consume()

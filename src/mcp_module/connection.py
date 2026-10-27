@@ -422,18 +422,14 @@ class MCPConnection:
         if sampling_callback is None:
             return None
 
-        context_capability = (
-            mcp_types.SamplingContextCapability()
-            if self.client_config.sampling_include_context_support
-            else None
-        )
         tools_capability = (
             mcp_types.SamplingToolsCapability()
             if self.client_config.sampling_tool_support
             else None
         )
         return mcp_types.SamplingCapability(
-            context=context_capability,
+            # 宿主尚未实现 includeContext 的上下文收集，不声明该能力。
+            context=None,
             tools=tools_capability,
         )
 

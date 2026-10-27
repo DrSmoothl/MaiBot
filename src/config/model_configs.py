@@ -278,11 +278,6 @@ class ModelInfo(ConfigBase):
     )
     """输入价格 (用于API调用统计, 单位：元/ M token) (可选, 若无该字段, 默认值为0)"""
 
-    cache: bool = Field(
-        default=False,
-    )
-    """遗留兼容字段，不参与任何逻辑：是否按缓存价计费由 cache_price_in 决定，统计页是否展示缓存用量由服务商是否在响应中返回缓存字段自动探测。"""
-
     cache_price_in: float = Field(
         default=0.0,
         ge=0,

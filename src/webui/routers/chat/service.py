@@ -20,16 +20,17 @@ from src.common.database.database_model import Messages, PersonInfo
 from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.config.config import global_config
-from src.services.bot_account_service import WEBUI_BOT_USER_ID
+from src.core.internal_chat import INTERNAL_CHAT_BOT_ID, INTERNAL_CHAT_PLATFORM, INTERNAL_CHAT_USER_ID
+from src.core.local_operator import PLUGIN_RELAY_CONFIG_KEY
+from src.services.internal_chat_profile import get_internal_chat_user_name, set_internal_chat_user_name
 
 from .serializers import serialize_message_sequence
 
 logger = get_logger("webui.chat")
 
-WEBUI_CHAT_GROUP_ID = "webui_local_chat"
+# 虚拟群聊的默认平台；普通聊天室独立使用 internal，不关联旧 webui 私聊。
 WEBUI_CHAT_PLATFORM = "webui"
 VIRTUAL_GROUP_ID_PREFIX = "webui_virtual_group_"
-WEBUI_USER_ID_PREFIX = "webui_user_"
 
 AsyncMessageSender = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -196,7 +197,7 @@ class ChatHistoryManager:
     ) -> Set[str]:
         """根据会话标识解析已存在的内部聊天会话 ID。
 
-        优先按虚拟群聊解析；否则按 WebUI 私聊解析。
+        优先按虚拟群聊解析；否则按 internal 主人私聊解析。
 
         Args:
             group_id: 群组标识（虚拟群聊模式）。
@@ -209,7 +210,7 @@ class ChatHistoryManager:
         if not target_id:
             return set()
         return core_chat_manager.resolve_session_ids_by_target(
-            platform=WEBUI_CHAT_PLATFORM,
+            platform=WEBUI_CHAT_PLATFORM if group_id else INTERNAL_CHAT_PLATFORM,
             target_id=target_id,
             chat_type="group" if group_id else "private",
         )
@@ -590,22 +591,6 @@ def compute_channel_key(virtual_config: Optional[VirtualIdentityConfig], user_id
     return f"private:{user_id}"
 
 
-def normalize_webui_user_id(user_id: Optional[str]) -> str:
-    """标准化 WebUI 用户 ID。
-
-    Args:
-        user_id: 原始用户 ID。
-
-    Returns:
-        str: 带统一前缀的用户 ID。
-    """
-    if not user_id:
-        return f"{WEBUI_USER_ID_PREFIX}{uuid.uuid4().hex[:16]}"
-    if user_id.startswith(WEBUI_USER_ID_PREFIX):
-        return user_id
-    return f"{WEBUI_USER_ID_PREFIX}{user_id}"
-
-
 def _normalize_client_text(value: Any, fallback: str, max_length: int = 64) -> str:
     text = str(value or fallback).strip()
     if not text:
@@ -755,7 +740,7 @@ def build_session_info_message(
         "platform": (
             virtual_config.platform
             if is_virtual_mode_enabled(virtual_config) and virtual_config
-            else WEBUI_CHAT_PLATFORM
+            else INTERNAL_CHAT_PLATFORM
         ),
         "client_mode": normalized_client_info["type"],
         "client": normalized_client_info,
@@ -957,24 +942,33 @@ def normalize_chat_images(raw_images: Any) -> List[Dict[str, str]]:
 
 
 def normalize_chat_files(raw_files: Any) -> List[Dict[str, Any]]:
-    if not isinstance(raw_files, list):
+    if raw_files is None:
         return []
+    if not isinstance(raw_files, list):
+        raise ValueError("附件必须是列表")
+    if len(raw_files) > 6:
+        raise ValueError("每条消息最多包含 6 个附件")
 
     files: List[Dict[str, Any]] = []
     for raw_file in raw_files[:6]:
         if not isinstance(raw_file, dict):
             continue
 
+        if raw_file.get("file_ref"):
+            files.append({"file_ref": str(raw_file["file_ref"]), "name": str(raw_file.get("name", ""))})
+            continue
+
         name = str(raw_file.get("name") or raw_file.get("file_name") or raw_file.get("filename") or "").strip()
         raw_base64 = str(raw_file.get("base64") or "").strip()
+        if len(raw_base64) > 4 * ((global_config.files.max_file_mib * 1024 ** 2 + 2) // 3):
+            raise ValueError("文件超过单文件上限，请使用文件上传入口")
         if not name or not raw_base64:
-            continue
+            raise ValueError("附件缺少文件名或内容")
 
         try:
             base64.b64decode(raw_base64, validate=True)
-        except (binascii.Error, ValueError):
-            logger.warning("WebUI chat file ignored: invalid base64 payload")
-            continue
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("附件 Base64 内容无效") from exc
 
         files.append(
             {
@@ -1079,7 +1073,7 @@ def create_message_data(
         actual_user_id = virtual_config.user_id or user_id
         actual_user_nickname = virtual_config.user_nickname or user_name
     else:
-        platform = WEBUI_CHAT_PLATFORM
+        platform = INTERNAL_CHAT_PLATFORM
         group_id = None
         group_name = None
         actual_user_id = user_id
@@ -1148,6 +1142,7 @@ def create_message_data(
                     "mime_type": file.get("mime_type", ""),
                     "size": file.get("size", 0),
                     "base64": file.get("base64", ""),
+                    "file_ref": file.get("file_ref", ""),
                 },
             }
         )
@@ -1155,7 +1150,7 @@ def create_message_data(
     display_content = build_display_content(content, normalized_images, normalized_emojis, normalized_files, normalized_voices)
 
     return {
-        "account_id": WEBUI_BOT_USER_ID if platform == WEBUI_CHAT_PLATFORM else None,
+        "account_id": INTERNAL_CHAT_BOT_ID if platform in {INTERNAL_CHAT_PLATFORM, WEBUI_CHAT_PLATFORM} else None,
         "scope": None,
         "message_info": message_info,
         "message_segment": {
@@ -1165,6 +1160,23 @@ def create_message_data(
         "raw_message": display_content,
         "processed_plain_text": display_content,
     }
+
+
+async def ensure_file_session(user_id: str, user_name: str, virtual_config: Optional[VirtualIdentityConfig]):
+    """上传前走正式聊天流创建链路，归属与下一条 WebUI 消息完全一致。"""
+    data = create_message_data(content="", user_id=user_id, user_name=user_name, message_id=uuid.uuid4().hex,
+                               is_at_bot=False, virtual_config=virtual_config)
+    info = data["message_info"]
+    group = info.get("group_info")
+    session = await core_chat_manager.get_or_create_session(
+        info["platform"], info["user_info"]["user_id"], group["group_id"] if group else None,
+        account_id=data["account_id"], scope=data["scope"],
+    )
+    if group:
+        session.group_name = group["group_name"]
+    else:
+        session.user_nickname = info["user_info"]["user_nickname"]
+    return session
 
 
 async def handle_chat_message(
@@ -1186,16 +1198,37 @@ async def handle_chat_message(
     Returns:
         str: 处理后的最新昵称。
     """
+    # 普通聊天的称呼由主程序统一管理，旧标签页或插件不能在发送时覆盖它。
+    if not is_virtual_mode_enabled(current_virtual_config):
+        current_user_name = await asyncio.to_thread(get_internal_chat_user_name)
     content = str(data.get("content", "")).strip()
     images = normalize_chat_images(data.get("images"))
     emojis = normalize_chat_images(data.get("emojis"))
-    files = normalize_chat_files(data.get("files"))
+    files = await asyncio.to_thread(normalize_chat_files, data.get("files"))
+    if files:
+        from src.files.service import disk_call, get_file_service
+
+        file_service = get_file_service()
+        file_service.require_enabled()
+        file_session = await ensure_file_session(normalized_user_id, current_user_name, current_virtual_config)
+        normalized_files = []
+        for file in files:
+            if file.get("file_ref"):
+                asset = await disk_call(file_service.store.get, file["file_ref"], file_session.session_id)
+            else:
+                content_bytes = await disk_call(base64.b64decode, file["base64"], validate=True)
+                asset = await file_service.create(file_session.session_id, file["name"], content_bytes, file["mime_type"])
+            normalized_files.append(file_service.store.public(asset))
+        files = normalized_files
     voices = normalize_chat_voices(data.get("voices"))
     if not content and not images and not emojis and not files and not voices:
         return current_user_name
     display_content = build_display_content(content, images, emojis, files, voices)
 
-    next_user_name = str(data.get("user_name", current_user_name))
+    next_user_name = (
+        str(data.get("user_name", current_user_name))
+        if is_virtual_mode_enabled(current_virtual_config) else current_user_name
+    )
     message_id = str(uuid.uuid4())
     timestamp = time.time()
     sender_name, sender_user_id = resolve_sender_identity(
@@ -1224,6 +1257,8 @@ async def handle_chat_message(
                 "is_bot": False,
             },
             "virtual_mode": is_virtual_mode_enabled(current_virtual_config),
+            # 同一身份可能有多个网页和插件界面同时在线，发送方凭 origin 识别自己的回显。
+            "origin": session_id,
         },
         user_id=normalized_user_id,
     )
@@ -1261,6 +1296,54 @@ async def handle_chat_message(
     return next_user_name
 
 
+async def relay_plugin_chat_message(plugin_id: str, content: str) -> str:
+    """把插件界面（如桌宠）里主人说的话投递到内部统一聊天，并同步给在线的网页聊天室。
+
+    消息记录插件来源，不具备任何受保护命令权限。
+
+    Args:
+        plugin_id: 代为投递的插件 ID。
+        content: 文本内容。
+
+    Returns:
+        str: 新消息 ID。
+    """
+    user_name = await asyncio.to_thread(get_internal_chat_user_name)
+    message_id = str(uuid.uuid4())
+    await chat_manager.broadcast_to_group(
+        None,
+        {
+            "type": "user_message",
+            "content": content,
+            "raw_content": content,
+            "images": [],
+            "emojis": [],
+            "files": [],
+            "voices": [],
+            "group_id": None,
+            "message_id": message_id,
+            "timestamp": time.time(),
+            "sender": {
+                "name": user_name,
+                "user_id": INTERNAL_CHAT_USER_ID,
+                "is_bot": False,
+            },
+            "virtual_mode": False,
+            "origin": f"plugin:{plugin_id}",
+        },
+        user_id=INTERNAL_CHAT_USER_ID,
+    )
+    message_data = create_message_data(
+        content=content,
+        user_id=INTERNAL_CHAT_USER_ID,
+        user_name=user_name,
+        message_id=message_id,
+    )
+    message_data["message_info"]["additional_config"][PLUGIN_RELAY_CONFIG_KEY] = plugin_id
+    await chat_bot.message_process(message_data)
+    return message_id
+
+
 async def handle_chat_ping(session_id: str) -> None:
     """处理聊天心跳。
 
@@ -1284,6 +1367,18 @@ async def handle_nickname_update(session_id: str, data: Dict[str, Any], current_
     new_name = str(data.get("user_name", "")).strip()
     if not new_name:
         return current_user_name
+
+    connection = chat_manager.get_session(session_id)
+    if connection is not None and not is_virtual_mode_enabled(connection.virtual_config):
+        new_name = await asyncio.to_thread(set_internal_chat_user_name, new_name)
+        for other in chat_manager.active_connections.values():
+            if other.user_id == INTERNAL_CHAT_USER_ID and not is_virtual_mode_enabled(other.virtual_config):
+                other.user_name = new_name
+        await chat_manager.broadcast_to_group(
+            None, {"type": "nickname_updated", "user_name": new_name, "timestamp": time.time()},
+            user_id=INTERNAL_CHAT_USER_ID,
+        )
+        return new_name
 
     await chat_manager.send_message(
         session_id,

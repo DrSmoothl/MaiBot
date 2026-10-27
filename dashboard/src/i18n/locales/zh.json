@@ -138,6 +138,7 @@
     },
     "sections": {
       "breakdowns": "分类统计",
+      "embeddings": "嵌入统计",
       "distributions": "数据分布图表"
     },
     "breakdowns": {
@@ -179,8 +180,7 @@
       "cacheMissTokens": "缓存未命中Token",
       "cacheHitRate": "缓存命中率",
       "cost": "累计花费",
-      "avgTime": "平均耗时",
-      "stdTime": "耗时标准差",
+      "time": "耗时",
       "callsPerReply": "每次回复平均调用次数",
       "tokensPerReply": "每次回复平均Token",
       "tokensPerCall": "每次调用平均Token",
@@ -256,12 +256,13 @@
       "resting": "休息中",
       "autonomous": "自主运行",
       "running": "操作执行中",
-      "pause": "暂停决策",
+      "pause": "暂停电脑输入",
       "takeover": "接管电脑",
-      "resume": "交还麦麦",
+      "resume": "恢复运行",
       "stop": "停止沙盒",
+      "restart": "重建沙盒",
       "refresh": "刷新画面",
-      "help": "持续取图，接管后可点击画面、右键和输入文字。接管会请求取消当前操作；暂停决策不会中断已提交的操作。",
+      "help": "内部 Planner、子 Agent 和外接 Agent 共用此电脑。接管后可点击画面、右键和输入文字。接管会取消在途操作并阻止自主输入；暂停电脑输入不会中断已提交的操作。",
       "screen": "电脑桌面",
       "text": "接管后输入文字，支持中文",
       "type": "输入文字",
@@ -1785,5 +1786,49 @@
     "mobileTextEmpty": "未填写",
     "mobileTextCancel": "取消",
     "mobileTextDone": "完成"
+  },
+  "dataManagement": {
+    "transfer": "备份与缓存"
+  },
+  "files": {
+    "disabled": "文件功能已关闭，请在「能力」中开启。",
+    "openSettings": "打开能力设置",
+    "title": "文件",
+    "description": "附件按聊天归属管理，按需下载；文本可预览，本地上传和生成的原件保留到手动删除。",
+    "storage": "已用空间",
+    "reserved": "预留空间",
+    "maximum": "单文件上限",
+    "chat": "聊天",
+    "allChats": "全部聊天",
+    "refresh": "刷新",
+    "upload": "上传文件",
+    "chooseChat": "先选择一个聊天，再上传文件。",
+    "download": "下载",
+    "read": "阅读文本",
+    "sendTo": "发送到聊天…",
+    "confirmSend": "确认将文件发送到「{{name}}」？",
+    "clearCache": "清理缓存",
+    "delete": "删除",
+    "confirmDelete": "确认删除「{{name}}」？本地原件无法恢复。",
+    "empty": "暂无附件",
+    "previous": "上一页",
+    "next": "下一页",
+    "encoding": "文本编码",
+    "close": "关闭",
+    "remote": "平台缓存",
+    "original": "本地原件",
+    "removeAttachment": "移除待发送附件（原件仍保存在文件管理中）",
+    "uploadFailed": "文件上传失败",
+    "state": {
+      "remote": "未下载",
+      "ready": "已就绪",
+      "failed": "失败",
+      "uploading": "上传中",
+      "downloading": "下载中"
+    },
+    "delivery": {
+      "sent": "文件已发送",
+      "unknown": "投递结果不确定，请核对聊天后再决定是否重发。"
+    }
   }
 }

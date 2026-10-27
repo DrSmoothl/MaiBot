@@ -257,17 +257,23 @@ async def graceful_shutdown(main_system: MainSystem | None = None) -> bool:
         )
 
         from src.agent.service import agent_service
+        from src.computer.service import computer_service
 
         # 实际 CLI 入口不经过 src.main.main 的 finally；保存电脑状态，保留沙盒供下次恢复。
         success = (
-            await _await_shutdown_step(agent_service.stop(), timeout=8.0, step_name="保存并断开电脑")
+            await _await_shutdown_step(agent_service.stop(), timeout=8.0, step_name="停止外接 Agent")
             and success
         )
 
-        # 关闭 WebUI 服务器
-        if main_system is not None and main_system.webui_server is not None:
+        success = (
+            await _await_shutdown_step(computer_service.stop(), timeout=8.0, step_name="保存并断开电脑")
+            and success
+        )
+
+        # 关闭公共 HTTP 服务器（包含文件传输和可选 WebUI）
+        if main_system is not None and main_system.http_server is not None:
             success = (
-                await _await_shutdown_step(main_system.webui_server.shutdown(), timeout=5.0, step_name="关闭 WebUI")
+                await _await_shutdown_step(main_system.http_server.shutdown(), timeout=5.0, step_name="关闭 HTTP 服务")
                 and success
             )
 

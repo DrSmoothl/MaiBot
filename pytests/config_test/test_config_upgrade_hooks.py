@@ -62,7 +62,6 @@ def test_split_chat_config_sections_upgrade_hook():
     config_data = {
         "chat": {
             "talk_value": 0.4,
-            "private_talk_value": 0.8,
             "enable_talk_value_rules": True,
             "talk_value_rules": [
                 {
@@ -92,7 +91,6 @@ def test_split_chat_config_sections_upgrade_hook():
     assert result.migrated is True
     assert chat_config["max_context_size"] == 40
     assert chat_config["reply_timing"]["talk_value"] == 0.4
-    assert chat_config["reply_timing"]["private_talk_value"] == 0.8
     assert chat_config["reply_timing"]["enable_talk_value_rules"] is True
     assert chat_config["reply_timing"]["talk_value_rules"][0]["value"] == 0.5
     assert chat_config["reply_style"]["enable_reply_quote"] is False

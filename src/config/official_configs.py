@@ -506,9 +506,9 @@ class ChatReplyTimingConfig(ConfigBase):
         default="natural",
         json_schema_extra={
             "label": {
-                "zh_CN": "消息防抖",
-                "en_US": "Message debouncing",
-                "ja_JP": "メッセージのデバウンス",
+                "zh_CN": "群聊消息防抖",
+                "en_US": "Group message debouncing",
+                "ja_JP": "グループメッセージのデバウンス",
             },
             "x-widget": "discrete-slider",
             "x-option-labels": {"off": "关闭", "fast": "快速", "natural": "自然", "steady": "沉稳"},
@@ -520,11 +520,35 @@ class ChatReplyTimingConfig(ConfigBase):
             },
         },
     )
-    """默认自然，只需选择关闭、快速、自然或沉稳，无需另开开关。
+    """仅作用于群聊，默认自然，只需选择关闭、快速、自然或沉稳，无需另开开关。
     一批指合并后一起送入判断的消息；新批次按上一条有效消息的间隔选择初始等待：超过 30 秒或没有历史为安静，否则为活跃。同人/换人均与紧邻的上一条消息比较，重新从新消息起计算等待，可提前或延后结束。
     快速为安静 1 秒、活跃 3 秒、同人 1 秒、换人 0.5 秒：更快，但更容易漏接分段补充。自然为 2/5/2/0.5 秒：默认折中。沉稳为 4/7/4/2 秒：减少更多判断、多留补充机会，也会让没有补充的消息多等，不能保证每个群、每次都更完整。
     三档共用：裸图开启新批次时至少等 4 秒，后续消息仍按续发规则重算；批次内纯表情包不能延长等待，但可以提前结束；整批从第一条实际收到起最多 8 秒，@或提及后最多 1 秒，连续提及取最早上限。上限优先于其他等待规则。
     更换等待档位从下一条有效消息起生效，不重置批次或提及上限，不延长已到期批次；选择关闭会结束正在进行的等待，之后新消息不再等待。这里的时间仅指防抖排队，不包含模型生成和发送耗时。
+    """
+
+    private_message_debounce_mode: Literal["off", "fast", "natural", "steady"] = Field(
+        default="natural",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "私聊消息防抖",
+                "en_US": "Private message debouncing",
+                "ja_JP": "プライベートメッセージのデバウンス",
+            },
+            "x-widget": "discrete-slider",
+            "x-option-labels": {"off": "关闭", "fast": "快速", "natural": "自然", "steady": "沉稳"},
+            "x-option-descriptions": {
+                "off": "关闭私聊防抖，新消息不等待，直接进入判断。",
+                "fast": "安静 1 秒、活跃 3 秒，连续补充 1 秒。等待更少，但更容易漏接分段补充。",
+                "natural": "默认：安静 2 秒、活跃 5 秒，连续补充 2 秒。兼顾等待时间和补充消息。",
+                "steady": "安静 4 秒、活跃 7 秒，连续补充 4 秒。多留补充时间，但没有补充时也更慢。",
+            },
+        },
+    )
+    """仅作用于私聊，与群聊档位独立，默认自然。
+    超过 30 秒没有有效消息时按安静开批，否则按活跃开批；连续补充从新消息起重算等待。
+    裸图开批至少等 4 秒，批次内纯表情包不延长等待，整批最多 8 秒，@或提及后最多 1 秒，上限优先。
+    更换档位从下一条有效消息起生效，不重置批次或提及上限，不延长已到期批次；选择关闭会结束正在进行的等待。时间不包含模型生成和发送耗时。
     """
 
     planner_message_steering: bool = Field(
@@ -556,24 +580,6 @@ class ChatReplyTimingConfig(ConfigBase):
         },
     )
     """群聊里麦麦主动说话的频率；越小越安静。"""
-
-    private_talk_value: float = Field(
-        default=1,
-        ge=0,
-        le=1,
-        deprecated=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "私聊频率",
-                "en_US": "Private talk frequency",
-                "ja_JP": "個別チャット発言頻度",
-            },
-            "x-widget": "slider",
-            "x-row": "talk-values",
-            "step": 0.001,
-        },
-    )
-    """旧版私聊频率，仅保留配置兼容，不再生效；请使用 private_reply_paused。"""
 
     private_reply_paused: bool = Field(
         default=False,
@@ -961,6 +967,19 @@ class CapabilitiesConfig(ConfigBase):
     __ui_label__ = "能力"
     __ui_order__ = 30
 
+    files: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "文件功能",
+                "en_US": "File capabilities",
+                "ja_JP": "ファイル機能",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """启用聊天附件登记、文件工具、插件 SDK 和 WebUI 文件入口；默认关闭，不依赖 WebUI 或沙盒开关。关闭后拒绝新的文件操作，不删除已有原件。"""
+
     tool_result_condense: bool = Field(
         default=False,
         json_schema_extra={
@@ -1034,7 +1053,7 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """仅作用于普通聊天模式：Planner 不调用工具而输出正文时，将正文作为指导启动一次回复；附件与插件参数通过 set_reply_options 提前设置。关闭时使用原有 reply 工具。切换从下一轮思考生效，Focus 不受影响。"""
+    """仅作用于普通聊天模式：Planner 不调用工具而输出正文时，将正文作为自然语言指导启动一次回复；篇幅、表达偏好和插件相关需求直接写入指导，引用与附件由并行回复补充器编排。关闭时使用原有 reply 工具。切换从下一轮思考生效，Focus 不受影响。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
@@ -1098,17 +1117,6 @@ class MessageReceiveConfig(ConfigBase):
     __ui_label__ = "消息接收"
     __ui_advanced__ = True
     __ui_order__ = 70
-
-    image_parse_threshold: int = Field(
-        default=5,
-        json_schema_extra={
-            "x-widget": "input",
-            "advanced": True,
-        },
-    )
-    """
-    单条消息图片数不超过这个值时才识图，避免图片太多拖慢处理。
-    """
 
     ban_words: set[str] = Field(
         default_factory=lambda: set(),
@@ -3990,6 +3998,13 @@ class LearningItem(ConfigBase):
 ExperimentalConfig.model_rebuild()
 
 
+class LearningBlacklistUser(ConfigBase):
+    """按平台和用户 ID 精确匹配学习来源，不影响正常聊天。"""
+
+    platform: str = Field(min_length=1, pattern=r"^\S+$", json_schema_extra={"label": "平台"})
+    user_id: str = Field(min_length=1, pattern=r"^\S+$", json_schema_extra={"label": "用户 ID"})
+
+
 class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
@@ -4124,6 +4139,12 @@ class ExpressionConfig(ConfigBase):
     )
     """_wrap_让多个群聊或私聊共享学到的表达方式。"""
 
+    learning_blacklist: List[LearningBlacklistUser] = Field(
+        default_factory=list,
+        json_schema_extra={"label": "学习黑名单", "x-widget": "custom"},
+    )
+    """不学习来源指向这些用户消息的表达；按平台和用户 ID 精确匹配，仍保留聊天上下文。"""
+
 
 class JargonConfig(ConfigBase):
     """黑话配置类"""
@@ -4165,6 +4186,12 @@ class JargonConfig(ConfigBase):
         },
     )
     """_wrap_让多个群聊或私聊共享学到的黑话。"""
+
+    learning_blacklist: List[LearningBlacklistUser] = Field(
+        default_factory=list,
+        json_schema_extra={"label": "学习黑名单", "x-widget": "custom"},
+    )
+    """不学习原消息指向这些用户的黑话；按平台和用户 ID 精确匹配，仍保留聊天上下文。"""
 
 
 class VoiceConfig(ConfigBase):
@@ -5284,34 +5311,7 @@ class WebUIConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """是否启动 WebUI 管理界面。"""
-
-    host: list[str] = Field(
-        default=["127.0.0.1", "::1"],
-        json_schema_extra={
-            "label": {
-                "zh_CN": "WebUI 主机",
-                "en_US": "WebUI host",
-                "ja_JP": "WebUI ホスト",
-            },
-            "x-widget": "tags",
-            "x-placeholder": "127.0.0.1",
-        },
-    )
-    """WebUI 监听地址列表；可同时绑定 IPv4 和 IPv6，例如 ["0.0.0.0", "::"]。"""
-
-    port: int = Field(
-        default=8001,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "WebUI 端口",
-                "en_US": "WebUI port",
-                "ja_JP": "WebUI ポート",
-            },
-            "x-widget": "input",
-        },
-    )
-    """WebUI 访问端口。"""
+    """是否加载 WebUI 管理界面和管理接口；关闭后公共 HTTP 文件传输仍然可用。"""
 
     mode: Literal["development", "production"] = Field(
         default="production",
@@ -5423,42 +5423,6 @@ class WebUIConfig(ConfigBase):
         },
     )
     """限制 WebUI 访问外部 URL，降低访问内网地址的风险。"""
-
-    enable_paragraph_content: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "加载段落全文",
-                "en_US": "Load full paragraph content",
-                "ja_JP": "段落全文を読み込む",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """知识图谱里是否加载段落全文；更完整但更占内存。"""
-
-
-class DatabaseConfig(ConfigBase):
-    """数据库配置类"""
-
-    __ui_parent__ = "debug"
-
-    save_binary_data: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "保存二进制原文件",
-                "en_US": "Save binary source files",
-                "ja_JP": "バイナリ原本を保存",
-            },
-            "x-widget": "switch",
-            "advanced": True,
-        },
-    )
-    """
-    是否保存语音等二进制原文件；更占空间，但方便以后重新识别。
-    """
-
 
 class MCPAuthorizationConfig(ConfigBase):
     """MCP HTTP 认证配置。"""
@@ -5572,16 +5536,6 @@ class MCPSamplingConfig(ConfigBase):
         },
     )
     """MCP Sampling 调用模型时使用的任务名。"""
-
-    include_context_support: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {"zh_CN": "携带上下文（暂未支持）"},
-            "x-widget": "switch",
-            "advanced": True,
-        },
-    )
-    """是否允许 Sampling 请求带上下文。"""
 
     tool_support: bool = Field(
         default=False,

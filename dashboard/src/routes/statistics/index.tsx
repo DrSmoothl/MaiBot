@@ -267,7 +267,11 @@ function SummaryMetrics({ period, locale }: { period: DetailedStatisticsPeriod; 
   )
 }
 
-function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[]; locale: string }) {
+function BreakdownTable({ rows, locale, embedding = false }: {
+  rows: DetailedStatisticsBreakdown[]
+  locale: string
+  embedding?: boolean
+}) {
   const { t } = useTranslation()
 
   if (rows.length === 0) {
@@ -282,17 +286,18 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
             { key: 'requests', value: formatNumber(row.request_count, locale), primary: true },
             { key: 'totalTokens', value: formatNumber(row.total_tokens, locale), primary: true },
             { key: 'cost', value: formatCurrency(row.total_cost, locale), primary: true },
-            { key: 'inputTokens', value: formatNumber(row.input_tokens, locale) },
+            { key: 'inputTokens', value: formatNumber(row.input_tokens, locale), primary: embedding },
             { key: 'outputTokens', value: formatNumber(row.output_tokens, locale) },
             { key: 'cacheHitTokens', value: formatNumber(row.cache_hit_tokens, locale) },
             { key: 'cacheMissTokens', value: formatNumber(row.cache_miss_tokens, locale) },
             { key: 'cacheHitRate', value: formatPercent(row.cache_hit_rate) },
-            { key: 'avgTime', value: `${row.avg_time_cost.toFixed(1)}s` },
-            { key: 'stdTime', value: `${row.std_time_cost.toFixed(1)}s` },
+            { key: 'time', value: `${row.avg_time_cost.toFixed(1)}±${row.std_time_cost.toFixed(1)}s` },
             { key: 'callsPerReply', value: formatOptionalNumber(row.avg_calls_per_reply, locale) },
             { key: 'tokensPerReply', value: formatOptionalNumber(row.avg_tokens_per_reply, locale) },
             { key: 'tokensPerCall', value: formatOptionalNumber(row.avg_tokens_per_call, locale) },
-          ]
+          ].filter((metric) => !embedding || [
+            'requests', 'inputTokens', 'cost', 'time', 'tokensPerCall',
+          ].includes(metric.key))
           const renderMetrics = (primary: boolean) => (
             <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-sm">
               {metrics.filter((metric) => Boolean(metric.primary) === primary).map((metric) => (
@@ -317,7 +322,7 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
         })}
       </div>
     <div className="hidden overflow-hidden rounded-md border sm:block">
-      <Table className="min-w-[1520px]">
+      <Table className={embedding ? 'min-w-[700px]' : 'min-w-[1460px]'}>
         <TableHeader className="bg-muted/60">
           <TableRow>
             <TableHead
@@ -328,16 +333,23 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
             </TableHead>
             <TableHead>{t('statisticsPage.table.requests')}</TableHead>
             <TableHead>{t('statisticsPage.table.inputTokens')}</TableHead>
-            <TableHead>{t('statisticsPage.table.outputTokens')}</TableHead>
-            <TableHead>{t('statisticsPage.table.totalTokens')}</TableHead>
-            <TableHead>{t('statisticsPage.table.cacheHitTokens')}</TableHead>
-            <TableHead>{t('statisticsPage.table.cacheMissTokens')}</TableHead>
-            <TableHead>{t('statisticsPage.table.cacheHitRate')}</TableHead>
+            {!embedding && (
+              <>
+                <TableHead>{t('statisticsPage.table.outputTokens')}</TableHead>
+                <TableHead>{t('statisticsPage.table.totalTokens')}</TableHead>
+                <TableHead>{t('statisticsPage.table.cacheHitTokens')}</TableHead>
+                <TableHead>{t('statisticsPage.table.cacheMissTokens')}</TableHead>
+                <TableHead>{t('statisticsPage.table.cacheHitRate')}</TableHead>
+              </>
+            )}
             <TableHead>{t('statisticsPage.table.cost')}</TableHead>
-            <TableHead>{t('statisticsPage.table.avgTime')}</TableHead>
-            <TableHead>{t('statisticsPage.table.stdTime')}</TableHead>
-            <TableHead>{t('statisticsPage.table.callsPerReply')}</TableHead>
-            <TableHead>{t('statisticsPage.table.tokensPerReply')}</TableHead>
+            <TableHead>{t('statisticsPage.table.time')}</TableHead>
+            {!embedding && (
+              <>
+                <TableHead>{t('statisticsPage.table.callsPerReply')}</TableHead>
+                <TableHead>{t('statisticsPage.table.tokensPerReply')}</TableHead>
+              </>
+            )}
             <TableHead>{t('statisticsPage.table.tokensPerCall')}</TableHead>
           </TableRow>
         </TableHeader>
@@ -353,16 +365,25 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
               </TableCell>
               <TableCell>{formatNumber(row.request_count, locale)}</TableCell>
               <TableCell>{formatNumber(row.input_tokens, locale)}</TableCell>
-              <TableCell>{formatNumber(row.output_tokens, locale)}</TableCell>
-              <TableCell>{formatNumber(row.total_tokens, locale)}</TableCell>
-              <TableCell>{formatNumber(row.cache_hit_tokens, locale)}</TableCell>
-              <TableCell>{formatNumber(row.cache_miss_tokens, locale)}</TableCell>
-              <TableCell>{formatPercent(row.cache_hit_rate)}</TableCell>
+              {!embedding && (
+                <>
+                  <TableCell>{formatNumber(row.output_tokens, locale)}</TableCell>
+                  <TableCell>{formatNumber(row.total_tokens, locale)}</TableCell>
+                  <TableCell>{formatNumber(row.cache_hit_tokens, locale)}</TableCell>
+                  <TableCell>{formatNumber(row.cache_miss_tokens, locale)}</TableCell>
+                  <TableCell>{formatPercent(row.cache_hit_rate)}</TableCell>
+                </>
+              )}
               <TableCell>{formatCurrency(row.total_cost, locale)}</TableCell>
-              <TableCell>{row.avg_time_cost.toFixed(1)}s</TableCell>
-              <TableCell>{row.std_time_cost.toFixed(1)}s</TableCell>
-              <TableCell>{formatOptionalNumber(row.avg_calls_per_reply, locale)}</TableCell>
-              <TableCell>{formatOptionalNumber(row.avg_tokens_per_reply, locale)}</TableCell>
+              <TableCell className="whitespace-nowrap">
+                {row.avg_time_cost.toFixed(1)}±{row.std_time_cost.toFixed(1)}s
+              </TableCell>
+              {!embedding && (
+                <>
+                  <TableCell>{formatOptionalNumber(row.avg_calls_per_reply, locale)}</TableCell>
+                  <TableCell>{formatOptionalNumber(row.avg_tokens_per_reply, locale)}</TableCell>
+                </>
+              )}
               <TableCell>{formatOptionalNumber(row.avg_tokens_per_call, locale)}</TableCell>
             </TableRow>
           ))}
@@ -411,6 +432,25 @@ function EmptyState() {
   )
 }
 
+function SplitBreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[]; locale: string }) {
+  const { t } = useTranslation()
+  const embeddingRows = rows.filter((row) => row.is_embedding)
+  const otherRows = rows.filter((row) => !row.is_embedding)
+  return (
+    <div className="space-y-4">
+      {(otherRows.length > 0 || embeddingRows.length === 0) && (
+        <BreakdownTable rows={otherRows} locale={locale} />
+      )}
+      {embeddingRows.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold">{t('statisticsPage.sections.embeddings')}</h3>
+          <BreakdownTable rows={embeddingRows} locale={locale} embedding />
+        </section>
+      )}
+    </div>
+  )
+}
+
 function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; locale: string }) {
   const { t } = useTranslation()
   return (
@@ -433,16 +473,16 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
             <TabsTrigger value="chats">{t('statisticsPage.breakdowns.chats')}</TabsTrigger>
           </TabsList>
           <TabsContent value="models" className="mt-0">
-            <BreakdownTable rows={period.models} locale={locale} />
+            <SplitBreakdownTable rows={period.models} locale={locale} />
           </TabsContent>
           <TabsContent value="taskGroups" className="mt-0">
-            <BreakdownTable rows={period.task_groups} locale={locale} />
+            <SplitBreakdownTable rows={period.task_groups} locale={locale} />
           </TabsContent>
           <TabsContent value="modules" className="mt-0">
-            <BreakdownTable rows={period.modules} locale={locale} />
+            <SplitBreakdownTable rows={period.modules} locale={locale} />
           </TabsContent>
           <TabsContent value="requestTypes" className="mt-0">
-            <BreakdownTable rows={period.request_types} locale={locale} />
+            <SplitBreakdownTable rows={period.request_types} locale={locale} />
           </TabsContent>
           <TabsContent value="chats" className="mt-0">
             <ChatTable period={period} locale={locale} />
@@ -970,7 +1010,7 @@ export function StatisticsPage() {
   const locale = i18n.resolvedLanguage || i18n.language
   const { data, error, loading, refresh } = useDetailedStatistics()
   const periods = useMemo(() => (data ? getOrderedPeriods(data) : []), [data])
-  const [activeTab, setActiveTab] = useState('all_time')
+  const [activeTab, setActiveTab] = useState('last_7_days')
   const validTabValues = new Set([...periods.map((period) => period.key), 'trends', 'metrics'])
   const selectedTab = validTabValues.has(activeTab) ? activeTab : (periods[0]?.key ?? 'trends')
 

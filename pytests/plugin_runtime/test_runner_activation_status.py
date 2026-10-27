@@ -105,6 +105,35 @@ def _request(method: str, payload: Dict[str, Any], plugin_id: str = "") -> Envel
     return Envelope(request_id=1, message_type=MessageType.REQUEST, method=method, plugin_id=plugin_id, payload=payload)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disable_via_reload", [False, True])
+async def test_reload_aware_plugin_gets_final_cleanup_when_disabled(activation_runtime, disable_via_reload):
+    runner, transport, paths = activation_runtime
+    source_path = paths[_UNRELATED] / "plugin.py"
+    source = source_path.read_text(encoding="utf-8")
+    source = source.replace("self.unloads = 0", "self.unloads = 0\n        self.unload_modes = []")
+    source = source.replace("async def on_unload(self):", "async def on_unload(self, *, for_reload=False):")
+    source = source.replace("self.unloads += 1", "self.unloads += 1\n        self.unload_modes.append(for_reload)")
+    source_path.write_text(source, encoding="utf-8")
+    await runner.run()
+    for _ in range(3):
+        previous = runner._loader.get_plugin(_UNRELATED)
+        result = await _reload(runner, "single", [_UNRELATED])
+        assert result.success
+        assert previous.instance.unload_modes == [True]
+    current = runner._loader.get_plugin(_UNRELATED)
+    if disable_via_reload:
+        _configure(paths[_UNRELATED], enabled=False)
+        result = await _reload(runner, "single", [_UNRELATED])
+        assert result.success
+        assert current.instance.unload_modes == [True, False]
+    else:
+        await runner._unload_plugins_by_ids([_UNRELATED], "disabled")
+        assert current.instance.unload_modes == [False]
+    assert runner._loader.get_plugin(_UNRELATED) is None
+    assert _UNRELATED not in transport.registered
+
+
 def _write_plugin(root: Path, plugin_id: str, dependencies: List[str] | None = None) -> Path:
     plugin_dir = root / plugin_id
     plugin_dir.mkdir()

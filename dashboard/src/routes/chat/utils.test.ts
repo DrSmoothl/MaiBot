@@ -3,9 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { VIRTUAL_TABS_STORAGE_KEY } from './types'
 import type { ChatTab, SavedVirtualTab } from './types'
 import {
-  generateUserId,
   getChatTabDisplayName,
-  getOrCreateUserId,
   getSavedVirtualTabs,
   getStoredUserAvatarVersion,
   getStoredUserName,
@@ -14,7 +12,6 @@ import {
   saveVirtualTabs,
 } from './utils'
 
-const USER_ID_STORAGE_KEY = 'maibot_webui_user_id'
 const USER_NAME_STORAGE_KEY = 'maibot_webui_user_name'
 const USER_AVATAR_VERSION_STORAGE_KEY = 'maibot_webui_user_avatar_version'
 
@@ -63,36 +60,6 @@ function makeSavedTab(id: string): SavedVirtualTab {
 
 beforeEach(() => {
   localStorage.clear()
-})
-
-describe('generateUserId', () => {
-  it('生成 webui_ 前缀、随机段和时间戳段组成的 ID', () => {
-    const id = generateUserId()
-    expect(id).toMatch(/^webui_[0-9a-z]+_[0-9a-z]+$/)
-  })
-
-  it('随机数不同则生成的 ID 不同', () => {
-    vi.spyOn(Math, 'random').mockReturnValueOnce(0.111111111).mockReturnValueOnce(0.999999999)
-    const first = generateUserId()
-    const second = generateUserId()
-    expect(first).not.toBe(second)
-  })
-})
-
-describe('getOrCreateUserId', () => {
-  it('无存储时生成新 ID 并写入 localStorage，重复调用返回同一 ID', () => {
-    const id = getOrCreateUserId()
-    expect(id).toMatch(/^webui_/)
-    expect(localStorage.getItem(USER_ID_STORAGE_KEY)).toBe(id)
-    // 第二次调用直接命中存储，不会再生成
-    expect(getOrCreateUserId()).toBe(id)
-  })
-
-  it('已有存储时直接返回存储值，不覆盖', () => {
-    localStorage.setItem(USER_ID_STORAGE_KEY, 'webui_existing_abc')
-    expect(getOrCreateUserId()).toBe('webui_existing_abc')
-    expect(localStorage.getItem(USER_ID_STORAGE_KEY)).toBe('webui_existing_abc')
-  })
 })
 
 describe('用户昵称存取', () => {

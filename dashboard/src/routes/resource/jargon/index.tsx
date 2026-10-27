@@ -3,6 +3,7 @@ import { Check, ChevronDown, Download, MoreHorizontal, Plus, Trash2, Upload, X }
 import { type ReactNode, useState } from 'react'
 
 import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { LearningExportDialog } from '@/components/learning-export-dialog'
 import { LearningCreateDialog } from '@/components/learning-create-dialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,13 +44,11 @@ import {
   DeleteConfirmDialog,
   JargonCreateDialog,
   JargonDetailDialog,
-  JargonExportDialog,
   JargonImportDialog,
 } from './JargonDialogs'
 import { JargonList } from './JargonList'
 
 import type { Jargon, JargonChatInfo } from '@/types/jargon'
-import type { JargonExportScope } from './JargonDialogs'
 import type { StatsData } from './types'
 
 interface JargonFilters {
@@ -73,11 +72,8 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
   const [isCreateChoiceOpen, setIsCreateChoiceOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
-  const [exportScope, setExportScope] = useState<JargonExportScope>('all')
-  const [exportIncludeChatInfo, setExportIncludeChatInfo] = useState(false)
   const [deleteConfirmJargon, setDeleteConfirmJargon] = useState<Jargon | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
-  const [exporting, setExporting] = useState(false)
   const [scopePanelCollapsed, setScopePanelCollapsed] = useState(false)
   const { toast } = useToast()
 
@@ -184,63 +180,6 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
 
   // 任何写操作成功后，按 'jargon' 前缀整体失效（列表 + 统计 + 聊天列表）
   const invalidateJargon = () => list.invalidate()
-
-  const downloadJson = (filename: string, data: unknown) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json;charset=utf-8',
-    })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-  }
-
-  const handleExport = async (scope: JargonExportScope, includeChatInfo: boolean) => {
-    const onlySelected = scope === 'selected'
-    const ids = onlySelected ? Array.from(selectedIds) : undefined
-    if (onlySelected && selectedIds.size === 0) {
-      toast({
-        title: '没有选中项目',
-        description: '请先选择要导出的黑话',
-        variant: 'destructive',
-      })
-      return
-    }
-
-    try {
-      setExporting(true)
-      const result = await exportJargons({
-        ids,
-        include_chat_info: includeChatInfo,
-      })
-      const scope = onlySelected ? 'selected' : 'all'
-      const suffix = includeChatInfo ? `${scope}-with-chat` : scope
-      downloadJson(`jargons-${suffix}.json`, result)
-      toast({
-        title: '导出成功',
-        description: `已导出 ${result.count} 个黑话`,
-      })
-      setIsExportDialogOpen(false)
-    } catch (error) {
-      toast({
-        title: '导出失败',
-        description: error instanceof Error ? error.message : '无法导出黑话',
-        variant: 'destructive',
-      })
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  const openExportDialog = () => {
-    setExportScope(selectedIds.size > 0 ? 'selected' : 'all')
-    setExportIncludeChatInfo(false)
-    setIsExportDialogOpen(true)
-  }
 
   // 列表行先即时打开详情弹窗，详情字段再按需补齐。
   const handleViewDetail = async (jargon: Jargon) => {
@@ -406,7 +345,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
             value={list.filters.sortBy}
             onValueChange={(value: JargonFilters['sortBy']) => list.setFilter('sortBy', value)}
           >
-            <SelectTrigger className="h-8 w-[130px]" aria-label="黑话排序">
+            <SelectTrigger controlSize="sm" className="w-[130px]" aria-label="黑话排序">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -450,11 +389,11 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={openExportDialog}
+            onClick={() => setIsExportDialogOpen(true)}
             aria-label="导出黑话"
             title="导出黑话"
           >
-            <Download className="h-4 w-4" />
+            <Upload className="h-4 w-4" />
           </Button>
           <Button size="sm" onClick={() => setIsCreateChoiceOpen(true)} aria-label="新增黑话">
             <Plus className="h-4 w-4" />
@@ -468,7 +407,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={() => setIsImportDialogOpen(true)}>
-                <Upload className="mr-2 h-4 w-4" />
+                <Download className="mr-2 h-4 w-4" />
                 导入黑话
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -504,6 +443,41 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-3 pb-4 sm:p-4">
+      {isExportDialogOpen && (
+        <LearningExportDialog
+          kind="jargon"
+          selectedIds={selectedIds}
+          chats={chatList.map((chat) => ({
+            id: chat.session_id,
+            name: formatChatDisplayName(chat.chat_name, chat.account_id),
+            targetId: chat.target_id,
+          }))}
+          groups={groups.map((group) => ({
+            id: group.index,
+            name: group.name,
+            chatIds: group.session_ids,
+            isGlobal: group.is_global,
+            details: [
+              group.name,
+              group.is_global ? '全局共享组：包含全部聊天' : `包含 ${group.members.length} 个聊天`,
+              ...group.members.map((member) =>
+                [formatChatDisplayName(member.chat_name, member.account_id), formatChatTargetLabel(member)]
+                  .filter(Boolean).join(' · ')
+              ),
+            ].join('\n'),
+          }))}
+          loading={chatListQuery.isPending || groupsQuery.isPending}
+          error={chatListQuery.isError || groupsQuery.isError}
+          onRetry={() => {
+            void chatListQuery.refetch()
+            void groupsQuery.refetch()
+          }}
+          onBack={() => setIsExportDialogOpen(false)}
+          onExport={({ ids, chatIds, includeChatInfo }) =>
+            exportJargons({ ids, session_ids: chatIds, include_chat_info: includeChatInfo })
+          }
+        />
+      )}
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto lg:overflow-hidden">
         <DataBrowserHeader
           title="学习"
@@ -675,19 +649,6 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
           list.clearSelection()
           invalidateJargon()
         }}
-      />
-
-      {/* 导出对话框 */}
-      <JargonExportDialog
-        open={isExportDialogOpen}
-        onOpenChange={setIsExportDialogOpen}
-        selectedCount={selectedIds.size}
-        scope={exportScope}
-        includeChatInfo={exportIncludeChatInfo}
-        exporting={exporting}
-        onScopeChange={setExportScope}
-        onIncludeChatInfoChange={setExportIncludeChatInfo}
-        onExport={handleExport}
       />
 
       {/* 删除确认对话框 */}

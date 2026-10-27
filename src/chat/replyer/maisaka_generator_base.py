@@ -1108,6 +1108,10 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         while True:
             try:
+                from src.common.runtime_loop import run_on_main_loop
+                from src.desktop_pet.service import desktop_pet_service
+
+                await run_on_main_loop(desktop_pet_service.notify_thinking(preview_chat_id))
                 before_request_result = await self._get_runtime_manager().invoke_hook(
                     "maisaka.replyer.before_request",
                     session_id=preview_chat_id,

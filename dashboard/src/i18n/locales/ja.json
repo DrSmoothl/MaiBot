@@ -122,7 +122,7 @@
       "last_hour": "過去1時間", "last_15_minutes": "過去15分"
     },
     "tabs": { "trends": "データグラフ", "metrics": "指標トレンド" },
-    "sections": { "breakdowns": "分類統計", "distributions": "データ分布" },
+    "sections": { "breakdowns": "分類統計", "embeddings": "埋め込み統計", "distributions": "データ分布" },
     "breakdowns": {
       "taskGroups": "タスクグループ別",
       "models": "モデル別",
@@ -141,7 +141,7 @@
     "table": {
       "name": "名前", "requests": "呼び出し回数", "inputTokens": "入力Token", "outputTokens": "出力Token",
       "totalTokens": "総Token", "cacheHitTokens": "キャッシュヒットToken", "cacheMissTokens": "キャッシュミスToken",
-      "cacheHitRate": "キャッシュヒット率", "cost": "累計費用", "avgTime": "平均時間", "stdTime": "時間標準偏差",
+      "cacheHitRate": "キャッシュヒット率", "cost": "累計費用", "time": "所要時間",
       "callsPerReply": "返信あたりの呼び出し", "tokensPerReply": "返信あたりのToken", "tokensPerCall": "呼び出しあたりのToken",
       "chat": "連絡先/グループ", "messages": "メッセージ数"
     },
@@ -189,12 +189,13 @@
       "resting": "休憩中",
       "autonomous": "自律探索中",
       "running": "操作実行中",
-      "pause": "判断を一時停止",
+      "pause": "PC入力を一時停止",
       "takeover": "操作を引き継ぐ",
-      "resume": "麦麦に操作を返す",
+      "resume": "再開",
       "stop": "サンドボックスを停止",
+      "restart": "サンドボックスを再作成",
       "refresh": "画面を更新",
-      "help": "画面を継続的に取得します。操作を引き継ぐとクリック・右クリック・文字入力ができます。引き継ぎは実行中操作の取消を要求し、判断の一時停止だけでは操作を中断しません。",
+      "help": "内部Planner、サブエージェント、外部AgentはこのPCを共有します。引き継ぐとクリック、右クリック、文字入力ができます。引き継ぎ時は実行中の操作をキャンセルし、自律入力を停止します。入力の一時停止では送信済みの操作は続行されます。",
       "screen": "コンピューター画面",
       "text": "操作を引き継いで文字を入力",
       "type": "文字入力",
@@ -1721,5 +1722,49 @@
     "mobileTextEmpty": "未入力",
     "mobileTextCancel": "キャンセル",
     "mobileTextDone": "完了"
+  },
+  "dataManagement": {
+    "transfer": "バックアップとキャッシュ"
+  },
+  "files": {
+    "disabled": "ファイル機能は無効です。「機能」設定で有効にしてください。",
+    "openSettings": "機能設定を開く",
+    "title": "ファイル",
+    "description": "ファイルはチャットに紐づけ、必要時にダウンロードします。テキストを閲覧でき、アップロード・生成した原本は手動削除まで保持します。",
+    "storage": "使用量",
+    "reserved": "予約済み",
+    "maximum": "ファイル上限",
+    "chat": "チャット",
+    "allChats": "すべてのチャット",
+    "refresh": "更新",
+    "upload": "ファイルをアップロード",
+    "chooseChat": "アップロード先のチャットを選択してください。",
+    "download": "ダウンロード",
+    "read": "テキストを読む",
+    "sendTo": "チャットに送信…",
+    "confirmSend": "「{{name}}」にファイルを送信しますか？",
+    "clearCache": "キャッシュ削除",
+    "delete": "削除",
+    "confirmDelete": "「{{name}}」を削除しますか？ローカルの原本は復元できません。",
+    "empty": "添付ファイルはありません",
+    "previous": "前へ",
+    "next": "次へ",
+    "encoding": "文字コード",
+    "close": "閉じる",
+    "remote": "プラットフォームキャッシュ",
+    "original": "ローカル原本",
+    "removeAttachment": "送信待ちから除く（原本は保持）",
+    "uploadFailed": "アップロード失敗",
+    "state": {
+      "remote": "未ダウンロード",
+      "ready": "準備完了",
+      "failed": "失敗",
+      "uploading": "アップロード中",
+      "downloading": "ダウンロード中"
+    },
+    "delivery": {
+      "sent": "送信済み",
+      "unknown": "配信結果が不明です。再送前にチャットを確認してください。"
+    }
   }
 }

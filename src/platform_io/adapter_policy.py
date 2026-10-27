@@ -95,7 +95,7 @@ class AdapterPolicyManager:
             )
 
         # 内置聊天室与本地控制台不属于外部适配器，不能被适配器名单禁用。
-        if identity.platform == "webui" or identity.platform in LOCAL_PLATFORM_BOT_IDS:
+        if identity.platform in {"internal", "webui"} or identity.platform in LOCAL_PLATFORM_BOT_IDS:
             return AdapterPolicyResult(
                 allowed=True,
                 configured=False,

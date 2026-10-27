@@ -29,6 +29,7 @@ from src.plugin_runtime import (
     ENV_BLOCKED_PLUGIN_REASONS,
     ENV_EXTERNAL_PLUGIN_IDS,
     ENV_FORCE_PLUGIN_COMPATIBILITY,
+    ENV_HOST_PID,
     ENV_HOST_VERSION,
     ENV_IPC_ADDRESS,
     ENV_LOCAL_PLUGIN_SDK_PATH,
@@ -1894,6 +1895,7 @@ class PluginRunnerSupervisor:
                 is_force_plugin_compatibility_enabled()
             ),
             ENV_HOST_VERSION: self._host_version,
+            ENV_HOST_PID: str(os.getpid()),
             ENV_IPC_ADDRESS: self._transport.get_address(),
             ENV_PLUGIN_DIRS: os.pathsep.join(str(path) for path in self._plugin_dirs),
             ENV_PLUGIN_TYPE_FILTER: self._plugin_type_filter,

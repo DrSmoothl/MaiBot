@@ -1458,7 +1458,8 @@ export function ReasoningProcessPage({
                   const metadataText = getReasoningMetadataText(item)
                   const rawPreviewText =
                     item.display_title ||
-                    (item.stage === 'replyer' ? item.output_preview : item.action_preview)
+                    (item.stage === 'replyer' || item.stage === 'expression_selector'
+                      ? item.output_preview : item.action_preview)
                   // 规划器没有调用任何工具时，这一轮就是不回复；用次要颜色标出，不和有动作的记录抢视线
                   const noReply = !rawPreviewText && item.stage === 'planner'
                   const previewText = rawPreviewText
@@ -1804,6 +1805,23 @@ export function ReasoningProcessPage({
                                 avatarMap={messageAvatarMap}
                                 botSelfNames={botSelfNames}
                               />
+                              {selected?.stage === 'expression_selector' && (
+                                <div className="mt-3 space-y-1.5 text-sm">
+                                  <div className="font-medium">已选表达</div>
+                                  {selected.selected_expressions?.length ? (
+                                    selected.selected_expressions.map((expression, index) => (
+                                      <div key={index} className="break-words whitespace-pre-wrap">
+                                        {expression.situation} → {expression.style}
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <div className="text-muted-foreground">
+                                      {selected.selected_expressions
+                                        ? '未选择表达' : '无法从记录还原已选表达'}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             {headerMeta.remainingText && (

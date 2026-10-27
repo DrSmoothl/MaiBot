@@ -11,6 +11,7 @@ import { Layout } from './components/layout'
 import { RoutePendingFallback } from './components/route-pending-fallback'
 import { checkAuth } from './hooks/use-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
+import { rememberMarketInstall } from './lib/plugin-market-navigation'
 
 // Root 路由
 const rootRoute = createRootRoute({
@@ -200,6 +201,20 @@ const plannerMonitorRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/monitor/index.tsx'), 'PlannerMonitorPage'),
 })
 
+const computerRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/computer',
+  component: lazyRouteComponent(() => import('./routes/computer'), 'ComputerPage'),
+})
+
+const filesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/files',
+  beforeLoad: () => {
+    throw redirect({ to: '/data-transfer', search: { tab: 'files' }, replace: true })
+  },
+})
+
 const agentRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/agent',
@@ -255,8 +270,11 @@ const pluginsEmbedRoute = createRoute({
 const pluginsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/plugins',
-  validateSearch: (search: Record<string, unknown>): { pluginId?: string } => ({
+  beforeLoad: ({ search }) => { rememberMarketInstall(search) },
+  validateSearch: (search: Record<string, unknown>): { pluginId?: string; installPluginId?: string; installVersion?: string } => ({
     pluginId: typeof search.pluginId === 'string' ? search.pluginId.trim() || undefined : undefined,
+    installPluginId: typeof search.installPluginId === 'string' && /^[\p{L}\p{N}_.-]{1,256}$/u.test(search.installPluginId) ? search.installPluginId : undefined,
+    installVersion: typeof search.installVersion === 'string' && /^[\w.+-]{1,80}$/.test(search.installVersion) ? search.installVersion : undefined,
   }),
   component: lazyRouteComponent(
     () => import('./routes/plugins/PluginMarketplacePage'),
@@ -321,10 +339,13 @@ const mcpSettingsRoute = createRoute({
   },
 })
 
-// 数据迁移与备份路由
+// 数据管理：迁移备份与文件管理共用入口。
 const dataTransferRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/data-transfer',
+  validateSearch: (search: Record<string, unknown>): { tab?: 'transfer' | 'files' } => ({
+    tab: search.tab === 'files' ? 'files' : undefined,
+  }),
   component: lazyRouteComponent(() => import('./routes/data-transfer'), 'DataTransferPage'),
 })
 
@@ -409,6 +430,8 @@ const routeTree = rootRoute.addChildren([
     reasoningProcessRoute,
     plannerMonitorRoute,
     agentRoute,
+    computerRoute,
+    filesRoute,
     chatManagementRoute,
     chatRoute,
     manageRoute,

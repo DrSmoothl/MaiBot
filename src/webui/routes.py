@@ -16,6 +16,8 @@ from src.webui.core import (
 from src.webui.core.security import TOKEN_SOURCE_TEMPORARY
 from src.webui.dependencies import require_auth, verify_token_optional
 from src.webui.routers.agent import router as agent_router
+from src.webui.routers.computer import router as computer_router
+from src.webui.routers.files import router as files_router
 from src.webui.routers.avatar import router as avatar_router
 from src.webui.routers.bot_accounts import router as bot_accounts_router
 from src.webui.routers.config import router as config_router
@@ -70,6 +72,8 @@ router.include_router(plugin_router)
 # 注册系统控制路由
 router.include_router(system_router)
 router.include_router(agent_router)
+router.include_router(computer_router)
+router.include_router(files_router)
 router.include_router(self_update_router)
 router.include_router(data_transfer_router)
 router.include_router(reasoning_process_router)

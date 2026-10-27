@@ -84,6 +84,7 @@ vi.mock('@/lib/http', () => ({ backendApi: { get: httpMocks.get } }))
 
 const breakdown: DetailedStatisticsBreakdown = {
   name: 'model-a',
+  is_embedding: false,
   request_count: 2,
   input_tokens: 20,
   output_tokens: 10,
@@ -101,6 +102,7 @@ const breakdown: DetailedStatisticsBreakdown = {
 
 const abnormalBreakdown: DetailedStatisticsBreakdown = {
   name: 'broken-model',
+  is_embedding: false,
   request_count: 0,
   input_tokens: 0,
   output_tokens: 0,

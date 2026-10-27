@@ -28,7 +28,7 @@ logger = get_logger("main")
 if TYPE_CHECKING:
     from maim_message import MessageServer
     from src.common.message_server.server import Server
-    from src.webui.webui_server import ThreadedWebUIServer
+    from src.common.http_service.server import ThreadedHTTPServer
 
 
 async def _wait_for_plugin_runners_spawned(
@@ -53,7 +53,7 @@ class MainSystem:
         # 使用消息API替代直接的FastAPI实例
         self.app: MessageServer | None = None
         self.server: Server | None = None
-        self.webui_server: ThreadedWebUIServer | None = None  # 独立线程中的 WebUI 服务器
+        self.http_server: ThreadedHTTPServer | None = None  # 独立线程中的公共 HTTP 服务器
         self._message_handlers_registered = False
         self.watchdog_task: Optional[asyncio.Task[None]] = None
 
@@ -85,29 +85,19 @@ class MainSystem:
         self.app.register_custom_message_handler("message_id_echo", chat_bot.echo_message_process)
         self._message_handlers_registered = True
 
-    def _start_webui_server(self) -> None:
-        """启动独立线程中的 WebUI 服务器。"""
-        from src.config.config import global_config
+    def _start_http_server(self) -> None:
+        """启动公共 HTTP 线程；WebUI 开关只决定是否挂载管理子应用。"""
+        from src.common.http_service.server import get_threaded_http_server
 
-        if not global_config.webui.enabled:
-            logger.info(t("startup.webui_disabled"))
-            return
-
-        try:
-            from src.webui.webui_server import get_threaded_webui_server
-
-            self.webui_server = get_threaded_webui_server()
-            self.webui_server.start()
-
-        except Exception as e:
-            logger.error(t("startup.webui_server_init_failed", error=e))
+        self.http_server = get_threaded_http_server()
+        self.http_server.start()
 
     async def initialize(self) -> None:
         """初始化系统组件"""
         logger.info(t("startup.waking_up", nickname=global_config.bot.nickname))
 
         # 主循环看门狗提前覆盖启动阶段；独立采样线程补充阻塞当时的调用栈。
-        # WebUI 循环另有一份看门狗，挂在 WebUI 服务器启动处。
+        # HTTP 循环另有一份看门狗，挂在公共 HTTP 服务器启动处。
         from src.common.event_loop_watchdog import start_watchdog
 
         self.watchdog_task = start_watchdog("main")
@@ -122,10 +112,16 @@ class MainSystem:
 
                 with diagnostic_stage("startup.database_maintenance"):
                     await asyncio.to_thread(run_startup_tool_record_vacuum_if_needed)
+                    from src.files.service import get_file_service
+
+                    await asyncio.to_thread(lambda: get_file_service().store.cleanup(startup=True))
                 await self._init_components()
+                # HTTP 在线程中并行启动；初始化成功前确认监听就绪，避免文件传输不可用却报启动成功。
+                if self.http_server is not None:
+                    await self.http_server.wait_started()
         except Exception:
-            if self.webui_server:
-                await self.webui_server.shutdown()
+            if self.http_server:
+                await self.http_server.shutdown()
             raise
 
         logger.info(t("startup.initialization_completed_banner", nickname=global_config.bot.nickname))
@@ -145,10 +141,10 @@ class MainSystem:
         with diagnostic_stage("startup.wait_runner_spawn"):
             await _wait_for_plugin_runners_spawned(plugin_runtime_manager, plugin_runtime_task)
 
-        # 数据库启动维护已完成；让 WebUI 在线程中加载，与后续组件初始化并行，
+        # 数据库启动维护已完成；让 HTTP 服务及可选 WebUI 在线程中加载，与后续组件初始化并行，
         # 无需等待全部插件就绪后才开放管理页面。
-        with diagnostic_stage("startup.webui"):
-            self._start_webui_server()
+        with diagnostic_stage("startup.http"):
+            self._start_http_server()
 
         with diagnostic_stage("startup.import_memory_host"):
             from src.A_memorix.host_service import a_memorix_host_service
@@ -207,8 +203,13 @@ class MainSystem:
         await memory_automation_service.start()
 
         from src.agent.service import agent_service
+        from src.computer.service import computer_service
+        from src.desktop_pet.service import desktop_pet_service
 
+        await computer_service.start()
         await agent_service.start()
+
+        await desktop_pet_service.start()
 
         # await asyncio.sleep(0.5) #防止logger输出飞了
 
@@ -252,6 +253,7 @@ class MainSystem:
                 should_schedule_image_path_maintenance_background,
             )
             from src.webui.routers.data_transfer import periodic_transfer_temp_cleanup
+            from src.files.service import periodic_file_cleanup
 
             # 在独立线程中巡检推理图片，空闲时也能清理旧版本遗留的孤立缓存。
             PromptPreviewLogger.start()
@@ -261,6 +263,7 @@ class MainSystem:
                 periodic_emoji_cache_cleanup(),
                 periodic_image_cache_cleanup(),
                 periodic_transfer_temp_cleanup(),
+                periodic_file_cleanup(),
             ]
             # 插件式适配器通过 SDK 通信，不依赖 maim_message 的网络监听服务。
             if global_config.maim_message.enabled:
@@ -300,15 +303,19 @@ async def main() -> None:
         from src.common.logger import stop_ws_broadcasts
         from src.common.shutdown import request_shutdown
         from src.agent.service import agent_service
+        from src.computer.service import computer_service
+        from src.desktop_pet.service import desktop_pet_service
 
         request_shutdown("main_finally")
         await stop_ws_broadcasts()
+        await desktop_pet_service.stop()
         if system.app is not None:
             await system.app.stop()
         await heartflow_manager.shutdown()
         await agent_service.stop()
-        if system.webui_server:
-            await system.webui_server.shutdown()
+        await computer_service.stop()
+        if system.http_server:
+            await system.http_server.shutdown()
         if system.watchdog_task is not None:
             system.watchdog_task.cancel()
             system.watchdog_task = None

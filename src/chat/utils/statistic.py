@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from html import escape
 from os import getenv
 from pathlib import Path
-from typing import TYPE_CHECKING, DefaultDict, Dict, Mapping, cast
+from time import perf_counter
+from typing import TYPE_CHECKING, DefaultDict, Dict, List, Mapping, Tuple, cast
 
 import asyncio
 import concurrent.futures
@@ -13,6 +14,8 @@ from typing_extensions import TypedDict
 
 from src.common.logger import get_logger
 from src.manager.async_task_manager import AsyncTask
+
+from .statistics_timeseries import collect_time_series
 
 if TYPE_CHECKING:
     from src.webui.schemas.statistics import (
@@ -51,12 +54,6 @@ class _LocalStorageProxy:
 
 
 local_storage = _LocalStorageProxy()
-
-
-def fetch_messages_since(*args, **kwargs):
-    from src.services.statistics_service import fetch_messages_since as impl
-
-    return impl(*args, **kwargs)
 
 
 def fetch_model_usage_since(*args, **kwargs):
@@ -116,6 +113,7 @@ def _resolve_statistics_report_path(record_file_path: str | None = None) -> str:
 
 
 class StatPeriodData(TypedDict):
+    classified_requests: Dict[str, Dict[str, float]]
     total_requests: int
     total_cost: float
     requests_by_type: defaultdict[str, int]
@@ -511,37 +509,49 @@ class StatisticOutputTask(AsyncTask):
 
     async def run(self):
         try:
+            started_at = perf_counter()
             now = datetime.now()
-            self._ensure_all_time_start_time(now)
+            # 首次解析统计起点需要查询数据库，也放在线程中，避免占住主事件循环。
+            await asyncio.to_thread(self._ensure_all_time_start_time, now)
+            logger.info(f"统计阶段耗时: 起点查询={perf_counter() - started_at:.2f}s")
 
             # 使用线程池并行执行耗时操作
             loop = asyncio.get_event_loop()
 
-            # 在线程池中并行执行数据收集和之前的HTML生成（如果存在）
+            # 在线程池中收集数据，再并行生成控制台输出和 HTML 报告。
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 logger.info("正在收集统计数据...")
 
+                stage_started_at = perf_counter()
                 await loop.run_in_executor(executor, refresh_statistics_aggregates)
+                logger.info(f"统计阶段耗时: 增量汇总={perf_counter() - stage_started_at:.2f}s")
 
                 # 数据收集任务
+                stage_started_at = perf_counter()
                 collect_task = loop.run_in_executor(executor, self._collect_all_statistics, now)
 
                 # 等待数据收集完成
                 stats = await collect_task
+                logger.info(f"统计阶段耗时: 多周期统计={perf_counter() - stage_started_at:.2f}s")
+                stage_started_at = perf_counter()
                 try:
                     await refresh_dashboard_statistics_cache()
                 except Exception as e:
                     logger.warning(f"刷新 WebUI 统计缓存失败，将继续生成 HTML 报告: {e}")
-                logger.info("统计数据收集完成")
+                logger.info(f"统计数据收集完成，首页缓存刷新耗时={perf_counter() - stage_started_at:.2f}s")
 
                 # 并行执行控制台输出和HTML报告生成
+                stage_started_at = perf_counter()
                 console_task = loop.run_in_executor(executor, self._statistic_console_output, stats, now)
                 html_task = loop.run_in_executor(executor, self._generate_html_report, stats, now)
 
                 # 等待两个输出任务完成
                 await asyncio.gather(console_task, html_task)
 
-            logger.info("统计数据输出完成")
+            logger.info(
+                f"统计数据输出完成，报表输出耗时={perf_counter() - stage_started_at:.2f}s，"
+                f"总耗时={perf_counter() - started_at:.2f}s"
+            )
         except Exception as e:
             logger.exception(f"输出统计数据过程中发生异常，错误信息：{e}")
 
@@ -565,6 +575,7 @@ class StatisticOutputTask(AsyncTask):
         std_time_costs_by_task: DefaultDict[str, float] = defaultdict(float)
 
         return {
+            "classified_requests": {},
             TOTAL_REQ_CNT: 0,
             REQ_CNT_BY_TYPE: defaultdict(int),
             REQ_CNT_BY_USER: defaultdict(int),
@@ -631,21 +642,12 @@ class StatisticOutputTask(AsyncTask):
         stats_period[key] = cast(int, stats_period.get(key, 0)) + amount
 
     @staticmethod
-    def _add_float_stat(stats_period: StatPeriodData, key: str, amount: float) -> None:
-        stats_period[key] = cast(float, stats_period.get(key, 0.0)) + amount
-
-    @staticmethod
     def _add_defaultdict_int(stats_period: StatPeriodData, key: str, subkey: str, amount: int) -> None:
         counter = cast(defaultdict[str, int], stats_period[key])
         counter[subkey] += amount
 
     @staticmethod
-    def _add_defaultdict_float(stats_period: StatPeriodData, key: str, subkey: str, amount: float) -> None:
-        counter = cast(defaultdict[str, float], stats_period[key])
-        counter[subkey] += amount
-
-    @staticmethod
-    def _collect_model_request_for_period(collect_period: list[tuple[str, datetime]]) -> StatPeriodMapping:
+    def _collect_model_request_for_period(collect_period: List[Tuple[str, datetime]]) -> StatPeriodMapping:
         """
         收集指定时间段的LLM请求统计数据
 
@@ -671,157 +673,102 @@ class StatisticOutputTask(AsyncTask):
             for period_key, _ in collect_period
         }
 
-        # 以最早的时间戳为起始时间获取记录
-        # Assuming LLMUsage.timestamp is a DateTimeField
+        # 以最早周期的起点查询模型记录，timestamp 使用 datetime 进行比较。
         query_start_time = collect_period[-1][1]
-        records = fetch_model_usage_since(query_start_time)
-        for record in records:
+        # 各维度只描述字段映射；同一条请求的字段解析、缓存归一化只做一次。
+        dimensions = (
+            ("type", REQ_CNT_BY_TYPE, IN_TOK_BY_TYPE, OUT_TOK_BY_TYPE, TOTAL_TOK_BY_TYPE,
+             CACHE_HIT_TOK_BY_TYPE, CACHE_MISS_TOK_BY_TYPE, COST_BY_TYPE),
+            ("user", REQ_CNT_BY_USER, IN_TOK_BY_USER, OUT_TOK_BY_USER, TOTAL_TOK_BY_USER,
+             CACHE_HIT_TOK_BY_USER, CACHE_MISS_TOK_BY_USER, COST_BY_USER),
+            ("model", REQ_CNT_BY_MODEL, IN_TOK_BY_MODEL, OUT_TOK_BY_MODEL, TOTAL_TOK_BY_MODEL,
+             CACHE_HIT_TOK_BY_MODEL, CACHE_MISS_TOK_BY_MODEL, COST_BY_MODEL),
+            ("module", REQ_CNT_BY_MODULE, IN_TOK_BY_MODULE, OUT_TOK_BY_MODULE, TOTAL_TOK_BY_MODULE,
+             CACHE_HIT_TOK_BY_MODULE, CACHE_MISS_TOK_BY_MODULE, COST_BY_MODULE),
+            ("task", REQ_CNT_BY_TASK, IN_TOK_BY_TASK, OUT_TOK_BY_TASK, TOTAL_TOK_BY_TASK,
+             CACHE_HIT_TOK_BY_TASK, CACHE_MISS_TOK_BY_TASK, COST_BY_TASK),
+        )
+        classified: Dict[str, Dict[Tuple[str, str, str], Dict[str, float]]] = {
+            period_key: {} for period_key, _ in collect_period
+        }
+        for record in fetch_model_usage_since(query_start_time):
             record_timestamp = cast(datetime, record["timestamp"])
-            for idx, (_, period_start) in enumerate(collect_period):
-                if record_timestamp >= period_start:
-                    for period_key, _ in collect_period[idx:]:
-                        StatisticOutputTask._add_int_stat(stats[period_key], TOTAL_REQ_CNT, 1)
+            request_type = cast(str | None, record["request_type"]) or "unknown"
+            user_id = cast(str | None, record["model_api_provider_name"]) or "unknown"
+            model_name = (
+                cast(str | None, record["model_assign_name"])
+                or cast(str | None, record["model_name"])
+                or "unknown"
+            )
+            session_id = str(record.get("session_id") or "").strip()
+            chat_cost_key = session_id if session_id else GLOBAL_COST_SESSION_KEY
+            # 提取模块名：如果请求类型包含"."，取第一个"."之前的部分。
+            module_name = request_type.split(".")[0] if "." in request_type else request_type
+            # 历史记录可能没有任务名，单独归为未记录，不根据请求前缀或当前配置推断。
+            task_name = cast(str | None, record.get("task_name")) or "未记录"
+            names = (request_type, user_id, model_name, module_name, task_name)
+            prompt_tokens = cast(int | None, record["prompt_tokens"]) or 0
+            completion_tokens = cast(int | None, record["completion_tokens"]) or 0
+            total_tokens = prompt_tokens + completion_tokens
+            hit_tokens = miss_tokens = 0
+            if record.get("prompt_cache_enabled"):
+                hit_tokens, miss_tokens = _normalize_prompt_cache_tokens(
+                    prompt_tokens,
+                    cast(int | None, record.get("prompt_cache_hit_tokens")) or 0,
+                    cast(int | None, record.get("prompt_cache_miss_tokens")) or 0,
+                )
+            cost = cast(float | None, record["cost"]) or 0.0
+            # 收集 time_cost 数据，只记录有效的耗时。
+            time_cost = cast(float | None, record["time_cost"]) or 0.0
+            # 在原始请求层面区分嵌入，避免同名模型或模块的两类调用混在一起。
+            request_kind = "embedding" if task_name in {"embedding", "image_embedding"} else "generation"
+            classification_keys = (
+                ("model", request_kind, model_name), ("module", request_kind, module_name),
+                ("task", request_kind, task_name), ("request_type", request_kind, request_type),
+            )
+            # 保存可累加的耗时矩，保证增量缓存合并后仍能正确计算均值和标准差。
+            metrics = (
+                ("request_count", 1), ("input_tokens", prompt_tokens), ("output_tokens", completion_tokens),
+                ("cache_hit_tokens", hit_tokens), ("cache_miss_tokens", miss_tokens), ("total_cost", cost),
+                ("duration_count", int(time_cost > 0)), ("duration_sum", time_cost if time_cost > 0 else 0.0),
+                ("duration_sum_sq", time_cost * time_cost if time_cost > 0 else 0.0),
+            )
+            for period_key, period_start in collect_period:
+                if record_timestamp < period_start:
+                    continue
+                period = stats[period_key]
+                period[TOTAL_REQ_CNT] += 1
+                period[TOTAL_COST] += cost
+                period[CACHE_HIT_TOK] += hit_tokens
+                period[CACHE_MISS_TOK] += miss_tokens
+                period[TOTAL_TOK_BY_CHAT][chat_cost_key] += total_tokens
+                period[COST_BY_CHAT][chat_cost_key] += cost
+                for name, (category, requests, inputs, outputs, tokens, hits, misses, costs) in zip(
+                    names, dimensions, strict=True,
+                ):
+                    period[requests][name] += 1
+                    period[inputs][name] += prompt_tokens
+                    period[outputs][name] += completion_tokens
+                    period[tokens][name] += total_tokens
+                    period[hits][name] += hit_tokens
+                    period[misses][name] += miss_tokens
+                    period[costs][name] += cost
+                    if time_cost > 0:
+                        item_stats = duration_stats[period_key][category][name]
+                        item_stats["count"] += 1
+                        delta = time_cost - item_stats["mean"]
+                        item_stats["mean"] += delta / item_stats["count"]
+                        item_stats["m2"] += delta * (time_cost - item_stats["mean"])
+                for key in classification_keys:
+                    totals = classified[period_key].setdefault(key, {})
+                    for metric, value in metrics:
+                        totals[metric] = totals.get(metric, 0.0) + value
 
-                        request_type = cast(str | None, record["request_type"]) or "unknown"
-                        user_id = cast(str | None, record["model_api_provider_name"]) or "unknown"
-                        model_assign_name = cast(str | None, record["model_assign_name"])
-                        model_name = model_assign_name or cast(str | None, record["model_name"]) or "unknown"
-                        session_id = str(record.get("session_id") or "").strip()
-                        chat_cost_key = session_id if session_id else GLOBAL_COST_SESSION_KEY
-
-                        # 提取模块名：如果请求类型包含"."，取第一个"."之前的部分
-                        module_name = request_type.split(".")[0] if "." in request_type else request_type
-                        # 历史记录可能没有任务名，单独归为未记录，不根据请求前缀或当前配置推断。
-                        task_name = cast(str | None, record.get("task_name")) or "未记录"
-
-                        StatisticOutputTask._add_defaultdict_int(stats[period_key], REQ_CNT_BY_TYPE, request_type, 1)
-                        StatisticOutputTask._add_defaultdict_int(stats[period_key], REQ_CNT_BY_USER, user_id, 1)
-                        StatisticOutputTask._add_defaultdict_int(stats[period_key], REQ_CNT_BY_MODEL, model_name, 1)
-                        StatisticOutputTask._add_defaultdict_int(stats[period_key], REQ_CNT_BY_MODULE, module_name, 1)
-                        StatisticOutputTask._add_defaultdict_int(stats[period_key], REQ_CNT_BY_TASK, task_name, 1)
-
-                        prompt_tokens = cast(int | None, record["prompt_tokens"]) or 0
-                        completion_tokens = cast(int | None, record["completion_tokens"]) or 0
-                        total_tokens = prompt_tokens + completion_tokens
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], TOTAL_TOK_BY_CHAT, chat_cost_key, total_tokens
-                        )
-                        prompt_cache_enabled = bool(record.get("prompt_cache_enabled"))
-                        prompt_cache_hit_tokens = 0
-                        prompt_cache_miss_tokens = 0
-                        if prompt_cache_enabled:
-                            prompt_cache_hit_tokens, prompt_cache_miss_tokens = _normalize_prompt_cache_tokens(
-                                prompt_tokens=prompt_tokens,
-                                hit_tokens=cast(int | None, record.get("prompt_cache_hit_tokens")) or 0,
-                                miss_tokens=cast(int | None, record.get("prompt_cache_miss_tokens")) or 0,
-                            )
-
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], IN_TOK_BY_TYPE, request_type, prompt_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], IN_TOK_BY_USER, user_id, prompt_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], IN_TOK_BY_MODEL, model_name, prompt_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], IN_TOK_BY_MODULE, module_name, prompt_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], IN_TOK_BY_TASK, task_name, prompt_tokens
-                        )
-
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], OUT_TOK_BY_TYPE, request_type, completion_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], OUT_TOK_BY_USER, user_id, completion_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], OUT_TOK_BY_MODEL, model_name, completion_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], OUT_TOK_BY_MODULE, module_name, completion_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], OUT_TOK_BY_TASK, task_name, completion_tokens
-                        )
-
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], TOTAL_TOK_BY_TYPE, request_type, total_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], TOTAL_TOK_BY_USER, user_id, total_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], TOTAL_TOK_BY_MODEL, model_name, total_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], TOTAL_TOK_BY_MODULE, module_name, total_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], TOTAL_TOK_BY_TASK, task_name, total_tokens
-                        )
-
-                        StatisticOutputTask._add_int_stat(stats[period_key], CACHE_HIT_TOK, prompt_cache_hit_tokens)
-                        StatisticOutputTask._add_int_stat(stats[period_key], CACHE_MISS_TOK, prompt_cache_miss_tokens)
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_HIT_TOK_BY_TYPE, request_type, prompt_cache_hit_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_HIT_TOK_BY_USER, user_id, prompt_cache_hit_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_HIT_TOK_BY_MODEL, model_name, prompt_cache_hit_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_HIT_TOK_BY_MODULE, module_name, prompt_cache_hit_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_HIT_TOK_BY_TASK, task_name, prompt_cache_hit_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_MISS_TOK_BY_TYPE, request_type, prompt_cache_miss_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_MISS_TOK_BY_USER, user_id, prompt_cache_miss_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_MISS_TOK_BY_MODEL, model_name, prompt_cache_miss_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_MISS_TOK_BY_MODULE, module_name, prompt_cache_miss_tokens
-                        )
-                        StatisticOutputTask._add_defaultdict_int(
-                            stats[period_key], CACHE_MISS_TOK_BY_TASK, task_name, prompt_cache_miss_tokens
-                        )
-
-                        cost = cast(float | None, record["cost"]) or 0.0
-                        StatisticOutputTask._add_float_stat(stats[period_key], TOTAL_COST, cost)
-                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_TYPE, request_type, cost)
-                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_USER, user_id, cost)
-                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_MODEL, model_name, cost)
-                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_MODULE, module_name, cost)
-                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_TASK, task_name, cost)
-                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_CHAT, chat_cost_key, cost)
-
-                        # 收集time_cost数据
-                        time_cost = cast(float | None, record["time_cost"]) or 0.0
-                        if time_cost > 0:  # 只记录有效的time_cost
-                            for category, item_name in [
-                                ("type", request_type),
-                                ("user", user_id),
-                                ("model", model_name),
-                                ("module", module_name),
-                                ("task", task_name),
-                            ]:
-                                item_stats = duration_stats[period_key][category][item_name]
-                                item_stats["count"] += 1
-                                delta = time_cost - item_stats["mean"]
-                                item_stats["mean"] += delta / item_stats["count"]
-                                item_stats["m2"] += delta * (time_cost - item_stats["mean"])
-                    break
+        # 输出时才序列化分类键，沿用现有缓存格式，避免每条请求、每个周期重复编码。
+        for period_key, totals in classified.items():
+            stats[period_key]["classified_requests"] = {
+                json.dumps(key, ensure_ascii=False): metrics for key, metrics in totals.items()
+            }
 
         # 计算平均耗时和标准差
         for period_key in stats:
@@ -962,6 +909,7 @@ class StatisticOutputTask(AsyncTask):
                 "last_full_statistics" in local_storage
                 and REQ_CNT_BY_TASK in local_storage["last_full_statistics"]["stat_data"]
                 and TOTAL_TOK_BY_CHAT in local_storage["last_full_statistics"]["stat_data"]
+                and "classified_requests" in local_storage["last_full_statistics"]["stat_data"]
             ):
                 # 如果存在上次完整统计数据，则使用该数据进行增量统计
                 last_stat = cast(dict[str, object], local_storage["last_full_statistics"])
@@ -1288,84 +1236,33 @@ class StatisticOutputTask(AsyncTask):
         cls,
         stat_data: StatPeriodData,
         dimension: str,
-    ) -> list["DetailedStatisticsBreakdown"]:
-        """将模型、模块或请求类型统计转换为统一的前端表格行。"""
+    ) -> List["DetailedStatisticsBreakdown"]:
+        """将模型、任务组、模块和请求类型的分类统计转换为前端表格行。"""
 
         from src.webui.schemas.statistics import DetailedStatisticsBreakdown
 
-        dimension_keys = {
-            "model": (
-                REQ_CNT_BY_MODEL,
-                IN_TOK_BY_MODEL,
-                OUT_TOK_BY_MODEL,
-                TOTAL_TOK_BY_MODEL,
-                CACHE_HIT_TOK_BY_MODEL,
-                CACHE_MISS_TOK_BY_MODEL,
-                COST_BY_MODEL,
-                AVG_TIME_COST_BY_MODEL,
-                STD_TIME_COST_BY_MODEL,
-            ),
-            "module": (
-                REQ_CNT_BY_MODULE,
-                IN_TOK_BY_MODULE,
-                OUT_TOK_BY_MODULE,
-                TOTAL_TOK_BY_MODULE,
-                CACHE_HIT_TOK_BY_MODULE,
-                CACHE_MISS_TOK_BY_MODULE,
-                COST_BY_MODULE,
-                AVG_TIME_COST_BY_MODULE,
-                STD_TIME_COST_BY_MODULE,
-            ),
-            "task": (
-                REQ_CNT_BY_TASK,
-                IN_TOK_BY_TASK,
-                OUT_TOK_BY_TASK,
-                TOTAL_TOK_BY_TASK,
-                CACHE_HIT_TOK_BY_TASK,
-                CACHE_MISS_TOK_BY_TASK,
-                COST_BY_TASK,
-                AVG_TIME_COST_BY_TASK,
-                STD_TIME_COST_BY_TASK,
-            ),
-            "request_type": (
-                REQ_CNT_BY_TYPE,
-                IN_TOK_BY_TYPE,
-                OUT_TOK_BY_TYPE,
-                TOTAL_TOK_BY_TYPE,
-                CACHE_HIT_TOK_BY_TYPE,
-                CACHE_MISS_TOK_BY_TYPE,
-                COST_BY_TYPE,
-                AVG_TIME_COST_BY_TYPE,
-                STD_TIME_COST_BY_TYPE,
-            ),
-        }
-        if dimension not in dimension_keys:
+        if dimension not in {"model", "module", "task", "request_type"}:
             raise ValueError(f"不支持的详细统计维度: {dimension}")
 
-        (
-            request_key,
-            input_key,
-            output_key,
-            token_key,
-            cache_hit_key,
-            cache_miss_key,
-            cost_key,
-            avg_time_key,
-            std_time_key,
-        ) = dimension_keys[dimension]
-        request_counts = cast(dict[str, int], stat_data[request_key])
-        total_replies = int(stat_data.get(TOTAL_REPLY_CNT, 0))
-
-        rows = []
-        for name, request_count in sorted(request_counts.items()):
-            input_tokens = cast(dict[str, int], stat_data[input_key])[name]
-            output_tokens = cast(dict[str, int], stat_data[output_key])[name]
-            total_tokens = cast(dict[str, int], stat_data[token_key])[name]
-            cache_hit_tokens = cast(dict[str, int], stat_data[cache_hit_key])[name]
-            cache_miss_tokens = cast(dict[str, int], stat_data[cache_miss_key])[name]
+        total_replies = int(stat_data[TOTAL_REPLY_CNT])
+        rows: List[DetailedStatisticsBreakdown] = []
+        for key, totals in stat_data["classified_requests"].items():
+            row_dimension, request_kind, name = json.loads(key)
+            if row_dimension != dimension:
+                continue
+            request_count = int(totals["request_count"])
+            input_tokens = int(totals["input_tokens"])
+            output_tokens = int(totals["output_tokens"])
+            total_tokens = input_tokens + output_tokens
+            cache_hit_tokens = int(totals["cache_hit_tokens"])
+            cache_miss_tokens = int(totals["cache_miss_tokens"])
+            duration_count = totals["duration_count"]
+            avg_time = totals["duration_sum"] / duration_count if duration_count > 0 else 0.0
+            variance = max(totals["duration_sum_sq"] / duration_count - avg_time**2, 0.0) if duration_count > 0 else 0.0
             rows.append(
                 DetailedStatisticsBreakdown(
                     name=name,
+                    is_embedding=request_kind == "embedding",
                     request_count=request_count,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -1373,15 +1270,15 @@ class StatisticOutputTask(AsyncTask):
                     cache_hit_tokens=cache_hit_tokens,
                     cache_miss_tokens=cache_miss_tokens,
                     cache_hit_rate=cls._calculate_cache_hit_rate_value(cache_hit_tokens, cache_miss_tokens),
-                    total_cost=cast(dict[str, float], stat_data[cost_key])[name],
-                    avg_time_cost=cast(dict[str, float], stat_data[avg_time_key])[name],
-                    std_time_cost=cast(dict[str, float], stat_data[std_time_key])[name],
+                    total_cost=totals["total_cost"],
+                    avg_time_cost=round(avg_time, 3),
+                    std_time_cost=round(variance**0.5, 3),
                     avg_calls_per_reply=request_count / total_replies if total_replies > 0 else None,
                     avg_tokens_per_reply=total_tokens / total_replies if total_replies > 0 else None,
                     avg_tokens_per_call=total_tokens / request_count if request_count > 0 else None,
                 )
             )
-        return rows
+        return sorted(rows, key=lambda row: (row.is_embedding, row.name))
 
     @staticmethod
     def _build_distribution_items(values: dict[str, float | int]) -> list["DetailedDistributionItem"]:
@@ -2065,14 +1962,12 @@ class StatisticOutputTask(AsyncTask):
             )
         )
 
-        # 不再添加版本对比内容
-        # 添加图表内容
-        chart_data = self._generate_chart_data(stat)
+        # 图表与指标趋势共用一次明细遍历，随后分别渲染。
+        series_started_at = perf_counter()
+        chart_data, metrics_data = self._generate_time_series(now)
         tab_content_list.append(self._generate_chart_tab(chart_data))
-
-        # 添加指标趋势图表
-        metrics_data = self._generate_metrics_data(now)
         tab_content_list.append(self._generate_metrics_tab(metrics_data))
+        logger.info(f"统计阶段耗时: 图表与指标趋势={perf_counter() - series_started_at:.2f}s")
 
         joined_tab_list = "\n".join(tab_list)
         joined_tab_content = "\n".join(tab_content_list)
@@ -2389,109 +2284,22 @@ class StatisticOutputTask(AsyncTask):
             self._build_detailed_statistics_snapshot(stat, now, chart_data, metrics_data)
         )
 
-    def _generate_chart_data(self, stat: StatPeriodMapping) -> dict[str, dict[str, object]]:
-        """生成图表数据"""
-        now = datetime.now()
-        chart_data: dict[str, dict[str, object]] = {}
+    @staticmethod
+    def _generate_time_series(now: datetime) -> Tuple[Dict[str, Dict[str, object]], Dict[str, Dict[str, object]]]:
+        """分批读取一次最大时间范围，为全部图表和指标填充时间桶。"""
+        from src.services.statistics_service import iter_messages_since
 
-        # 支持多个时间范围
-        time_ranges = [
-            ("6h", 6, 10),  # 6小时，10分钟间隔
-            ("12h", 12, 15),  # 12小时，15分钟间隔
-            ("24h", 24, 15),  # 24小时，15分钟间隔
-            ("48h", 48, 30),  # 48小时，30分钟间隔
-        ]
+        from .utils import is_bot_self
 
-        for range_key, hours, interval_minutes in time_ranges:
-            range_data = self._collect_interval_data(now, hours, interval_minutes)
-            chart_data[range_key] = range_data
-
-        return chart_data
-
-    def _collect_interval_data(self, now: datetime, hours: int, interval_minutes: int) -> dict[str, object]:
-        """收集指定时间范围内每个间隔的数据"""
-        # 生成时间点
-        start_time = now - timedelta(hours=hours)
-        time_points = []
-        current_time = start_time
-
-        while current_time <= now:
-            time_points.append(current_time)
-            current_time += timedelta(minutes=interval_minutes)
-
-        # 初始化数据结构
-        total_cost_data: list[float] = [0.0] * len(time_points)
-        cost_by_model: dict[str, list[float]] = {}
-        cost_by_module: dict[str, list[float]] = {}
-        message_by_chat: dict[str, list[int]] = {}
-        time_labels = [t.strftime("%H:%M") for t in time_points]
-
-        interval_seconds = interval_minutes * 60
-
-        # 查询LLM使用记录
-        query_start_time = start_time
-        records = fetch_model_usage_since(query_start_time)
-        for record in records:
-            record_time = cast(datetime, record["timestamp"])
-
-            # 找到对应的时间间隔索引
-            time_diff = (record_time - start_time).total_seconds()
-            interval_index = int(time_diff // interval_seconds)
-
-            if 0 <= interval_index < len(time_points):
-                # 累加总花费数据
-                cost = cast(float | None, record["cost"]) or 0.0
-                total_cost_data[interval_index] += cost
-
-                # 累加按模型分类的花费
-                model_assign_name = cast(str | None, record["model_assign_name"])
-                model_name = model_assign_name or cast(str | None, record["model_name"]) or "unknown"
-                if model_name not in cost_by_model:
-                    cost_by_model[model_name] = [0.0] * len(time_points)
-                cost_by_model[model_name][interval_index] += cost
-
-                # 累加按模块分类的花费
-                request_type = cast(str | None, record["request_type"]) or "unknown"
-                module_name = request_type.split(".")[0] if "." in request_type else request_type
-                if module_name not in cost_by_module:
-                    cost_by_module[module_name] = [0.0] * len(time_points)
-                cost_by_module[module_name][interval_index] += cost
-
-        # 查询消息记录
-        query_start_timestamp = start_time.timestamp()
-        messages = fetch_messages_since(start_time)
-        for message in messages:
-            message_time_ts = message.statistics_time.timestamp()
-
-            # 找到对应的时间间隔索引
-            time_diff = message_time_ts - query_start_timestamp
-            interval_index = int(time_diff // interval_seconds)
-
-            if 0 <= interval_index < len(time_points):
-                # 确定聊天流名称
-                chat_name = None
-                if message.group_id:
-                    chat_name = message.group_name or f"群{message.group_id}"
-                elif message.user_id:
-                    chat_name = message.user_nickname or f"用户{message.user_id}"
-                else:
-                    continue
-
-                if not chat_name:
-                    continue
-
-                # 累加消息数
-                if chat_name not in message_by_chat:
-                    message_by_chat[chat_name] = [0] * len(time_points)
-                message_by_chat[chat_name][interval_index] += 1
-
-        return {
-            "time_labels": time_labels,
-            "total_cost_data": total_cost_data,
-            "cost_by_model": cost_by_model,
-            "cost_by_module": cost_by_module,
-            "message_by_chat": message_by_chat,
-        }
+        chart_now = datetime.now()
+        start = min(chart_now - timedelta(hours=48), now - timedelta(days=30))
+        return collect_time_series(
+            now, chart_now,
+            fetch_model_usage_since(start),
+            iter_messages_since(start),
+            fetch_online_time_since(now - timedelta(days=30)),
+            is_bot_self,
+        )
 
     def _generate_chart_tab(self, chart_data: dict[str, dict[str, object]]) -> str:
         # sourcery skip: extract-duplicate-method, move-assign-in-block
@@ -2773,131 +2581,6 @@ class StatisticOutputTask(AsyncTask):
             </script>
         </div>
         """
-
-    def _generate_metrics_data(self, now: datetime) -> dict[str, object]:
-        """生成指标趋势数据"""
-        metrics_data = {}
-
-        # 24小时尺度：1小时为单位
-        metrics_data["24h"] = self._collect_metrics_interval_data(now, hours=24, interval_hours=1)
-
-        # 7天尺度：1天为单位
-        metrics_data["7d"] = self._collect_metrics_interval_data(now, hours=24 * 7, interval_hours=24)
-
-        # 30天尺度：1天为单位
-        metrics_data["30d"] = self._collect_metrics_interval_data(now, hours=24 * 30, interval_hours=24)
-
-        return metrics_data
-
-    def _collect_metrics_interval_data(self, now: datetime, hours: int, interval_hours: int) -> dict[str, object]:
-        """收集指定时间范围内每个间隔的指标数据"""
-        start_time = now - timedelta(hours=hours)
-        time_points = []
-        current_time = start_time
-
-        # 生成时间点
-        while current_time <= now:
-            time_points.append(current_time)
-            current_time += timedelta(hours=interval_hours)
-
-        # 初始化数据结构
-        cost_per_100_messages = [0.0] * len(time_points)  # 花费/消息数量（每100条）
-        cost_per_hour = [0.0] * len(time_points)  # 花费/时间（每小时）
-        tokens_per_hour = [0.0] * len(time_points)  # Token/时间（每小时）
-        cost_per_100_replies = [0.0] * len(time_points)  # 花费/回复数量（每100条）
-
-        # 每个时间点的累计数据
-        total_costs = [0.0] * len(time_points)
-        total_tokens = [0] * len(time_points)
-        total_messages = [0] * len(time_points)
-        total_replies = [0] * len(time_points)
-        total_online_hours = [0.0] * len(time_points)
-
-        from src.chat.utils.utils import is_bot_self
-
-        interval_seconds = interval_hours * 3600
-
-        # 查询LLM使用记录
-        query_start_time = start_time
-        records = fetch_model_usage_since(query_start_time)
-        for record in records:
-            record_time = cast(datetime, record["timestamp"])
-
-            # 找到对应的时间间隔索引
-            time_diff = (record_time - start_time).total_seconds()
-            interval_index = int(time_diff // interval_seconds)
-
-            if 0 <= interval_index < len(time_points):
-                cost = cast(float | None, record["cost"]) or 0.0
-                prompt_tokens = cast(int | None, record["prompt_tokens"]) or 0
-                completion_tokens = cast(int | None, record["completion_tokens"]) or 0
-                total_token = prompt_tokens + completion_tokens
-
-                total_costs[interval_index] += cost
-                total_tokens[interval_index] += total_token
-
-        # 查询消息记录
-        query_start_timestamp = start_time.timestamp()
-        messages = fetch_messages_since(start_time)
-        for message in messages:
-            message_time_ts = message.statistics_time.timestamp()
-
-            time_diff = message_time_ts - query_start_timestamp
-            interval_index = int(time_diff // interval_seconds)
-
-            if 0 <= interval_index < len(time_points):
-                total_messages[interval_index] += 1
-                # 检查是否是bot发送的消息（回复）
-                if is_bot_self(message.platform or "", message.user_id or ""):
-                    total_replies[interval_index] += 1
-
-        # 查询在线时间记录
-        records = fetch_online_time_since(start_time)
-        for record_start, record_end in records:
-            # 找到记录覆盖的所有时间间隔
-            for idx, time_point in enumerate(time_points):
-                interval_start = time_point
-                interval_end = time_point + timedelta(hours=interval_hours)
-
-                # 计算重叠部分
-                overlap_start = max(record_start, interval_start)
-                overlap_end = min(record_end, interval_end)
-
-                if overlap_end > overlap_start:
-                    overlap_hours = (overlap_end - overlap_start).total_seconds() / 3600.0
-                    total_online_hours[idx] += overlap_hours
-
-        # 计算指标
-        for idx in range(len(time_points)):
-            # 花费/消息数量（每100条）
-            if total_messages[idx] > 0:
-                cost_per_100_messages[idx] = total_costs[idx] / total_messages[idx] * 100
-
-            # 花费/时间（每小时）
-            if total_online_hours[idx] > 0:
-                cost_per_hour[idx] = total_costs[idx] / total_online_hours[idx]
-
-            # Token/时间（每小时）
-            if total_online_hours[idx] > 0:
-                tokens_per_hour[idx] = total_tokens[idx] / total_online_hours[idx]
-
-            # 花费/回复数量（每100条）
-            if total_replies[idx] > 0:
-                cost_per_100_replies[idx] = total_costs[idx] / total_replies[idx] * 100
-
-        # 生成时间标签
-        if interval_hours == 1:
-            time_labels = [t.strftime("%H:%M") for t in time_points]
-        else:
-            time_labels = [t.strftime("%m-%d") for t in time_points]
-
-        return {
-            "time_labels": time_labels,
-            "cost_per_100_messages": cost_per_100_messages,
-            "cost_per_hour": cost_per_hour,
-            "tokens_per_hour": tokens_per_hour,
-            "cost_per_100_replies": cost_per_100_replies,
-        }
 
     def _generate_metrics_tab(self, metrics_data: dict[str, object]) -> str:
         """生成指标趋势图表选项卡HTML内容"""

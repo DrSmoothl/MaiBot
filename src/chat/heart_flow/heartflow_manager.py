@@ -131,11 +131,15 @@ class HeartflowManager:
     async def clear_chat_history_context(self, session_id: str) -> bool:
         """停止并移除当前会话运行时，使其短期历史上下文立即失效。"""
 
+        from src.agent.planner_state import reset_planner_session
+
         if session_id not in self.heartflow_chat_list:
             await focus_mode_manager.clear_context(session_id)
+            await reset_planner_session(session_id)
             return False
 
         await self._evict_chat(session_id, reason="clear_context_command")
+        await reset_planner_session(session_id)
         return True
 
     async def close_policy_blocked_chats(self) -> None:
@@ -147,7 +151,7 @@ class HeartflowManager:
     async def _is_session_allowed(self, session: BotChatSession) -> bool:
         """在运行实例的创建和注销入口检查适配器名单。"""
         # 本地控制台和 WebUI 聊天室不属于外部适配器名单。
-        if session.platform in LOCAL_PLATFORM_BOT_IDS or session.platform == "webui":
+        if session.platform in LOCAL_PLATFORM_BOT_IDS or session.platform in {"internal", "webui"}:
             return True
         manager = get_platform_io_manager()
         await manager.ensure_send_pipeline_ready()

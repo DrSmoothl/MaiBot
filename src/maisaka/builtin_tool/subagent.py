@@ -282,6 +282,9 @@ async def _run_sub_agent_rounds(
                 )
             tool_result_message = _build_tool_result_message(tool_call, result, logical_turn_id)
             sub_agent_history.append(tool_result_message)
+            if result.content_items:
+                # 截图只进入子代理自己的上下文，父 Planner 仍只接收最终结论。
+                sub_agent_history.extend(engine._build_tool_result_media_messages(tool_call, result))
             await emit_subagent_tool_result(
                 session_id=runtime.session_id,
                 task_id=task_id,

@@ -67,36 +67,9 @@ class PromptPreviewRouteTarget:
 def _build_webui_local_base_url() -> str:
     """构建终端可直接打开的本机 WebUI 地址。"""
 
-    try:
-        from src.config.config import global_config
+    from src.config.startup_bindings import get_local_http_base_url
 
-        host = _select_webui_local_host(global_config.webui.host)
-        port = int(global_config.webui.port or 8001)
-    except Exception:
-        host = "127.0.0.1"
-        port = 8001
-
-    if host in {"0.0.0.0", "::"}:
-        host = "127.0.0.1"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"http://{host}:{port}"
-
-
-def _select_webui_local_host(hosts: Any) -> str:
-    """从 WebUI 监听地址中选择适合终端打开的本机地址。"""
-
-    if isinstance(hosts, str):
-        return hosts.strip() or "127.0.0.1"
-    if isinstance(hosts, list):
-        normalized_hosts = [host.strip() for host in hosts if isinstance(host, str) and host.strip()]
-        if "127.0.0.1" in normalized_hosts:
-            return "127.0.0.1"
-        if "::1" in normalized_hosts:
-            return "::1"
-        if normalized_hosts:
-            return normalized_hosts[0]
-    return "127.0.0.1"
+    return get_local_http_base_url()
 
 
 def _resolve_prompt_preview_route_target(file_path: Path) -> PromptPreviewRouteTarget | None:
@@ -481,13 +454,13 @@ class PromptCLIVisualizer:
                 image_pair = cls._extract_image_pair(item)
                 if image_pair is not None:
                     image_format, image_base64 = image_pair
-                    approx_size = max(0, len(str(image_base64)) * 3 // 4)
+                    approx_size = len(image_base64) * 3 // 4
                     parts.append(f"[图片 image/{image_format} {approx_size} B]")
                     continue
                 image_dict_pair = cls._extract_image_dict_pair(item)
                 if image_dict_pair is not None:
                     image_format, image_base64 = image_dict_pair
-                    approx_size = max(0, len(str(image_base64)) * 3 // 4)
+                    approx_size = len(image_base64) * 3 // 4
                     parts.append(f"[图片 image/{image_format} {approx_size} B]")
                     continue
                 if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
@@ -560,7 +533,7 @@ class PromptCLIVisualizer:
         """构建结构化 JSON 中的图片引用，避免默认写入大块 base64。"""
 
         normalized_format = cls._normalize_image_format(image_format) or "bin"
-        approx_size = max(0, len(image_base64) * 3 // 4)
+        approx_size = len(image_base64) * 3 // 4
         payload: dict[str, Any] = {
             "type": "image",
             "image_format": normalized_format,
@@ -694,7 +667,7 @@ class PromptCLIVisualizer:
             normalized_value = value.strip()
             if normalized_value.startswith("data:") and ";base64," in normalized_value:
                 header, base64_value = normalized_value.split(",", maxsplit=1)
-                size_bytes = max(0, len(base64_value) * 3 // 4)
+                size_bytes = len(base64_value) * 3 // 4
                 if size_bytes > PROVIDER_RESPONSE_BASE64_OMIT_THRESHOLD_BYTES:
                     media_type = header.removeprefix("data:").split(";", maxsplit=1)[0]
                     return cls._build_omitted_binary_reference(
@@ -706,7 +679,7 @@ class PromptCLIVisualizer:
             if cls._looks_like_large_base64(normalized_value):
                 return cls._build_omitted_binary_reference(
                     normalized_value,
-                    size_bytes=max(0, len(normalized_value) * 3 // 4),
+                    size_bytes=len(normalized_value) * 3 // 4,
                 )
             return value
         if isinstance(value, dict):

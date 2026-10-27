@@ -50,6 +50,7 @@ from .v41_to_v42 import BEHAVIOR_TABLES, migrate_v41_to_v42
 from .v42_to_v43 import migrate_v42_to_v43
 from .v43_to_v44 import migrate_v43_to_v44
 from .v44_to_v45 import migrate_v44_to_v45
+from .v45_to_v46 import migrate_v45_to_v46
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -98,7 +99,8 @@ V42_SCHEMA_VERSION = 42
 V43_SCHEMA_VERSION = 43
 V44_SCHEMA_VERSION = 44
 V45_SCHEMA_VERSION = 45
-LATEST_SCHEMA_VERSION = 45
+V46_SCHEMA_VERSION = 46
+LATEST_SCHEMA_VERSION = 46
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -1979,6 +1981,13 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v44_to_v45",
                 description="为消息保留独立的高精度实际接收时间，历史记录保持为空。",
                 handler=migrate_v44_to_v45,
+            ),
+            MigrationStep(
+                version_from=V45_SCHEMA_VERSION,
+                version_to=V46_SCHEMA_VERSION,
+                name="v45_to_v46",
+                description="新增独立文件服务、附件归属和解析状态表。",
+                handler=migrate_v45_to_v46,
             ),
         ]
     )

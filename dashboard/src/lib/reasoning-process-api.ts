@@ -17,6 +17,7 @@ export type ReasoningPromptFile = {
   html_path: string | null
   json_path: string | null
   output_preview: string | null
+  selected_expressions?: { situation: string; style: string }[] | null
   action_preview: string | null
   display_title: string | null
   related_json_paths: string[]

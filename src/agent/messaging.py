@@ -1,5 +1,6 @@
 """独立 Agent 与 IM 共用的适配层：真实会话查询、传话和图片引用。"""
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ import time
 
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.common.data_models.message_component_data_model import ImageComponent
+from src.common.i18n import get_locale
 
 if TYPE_CHECKING:
     from .service import AgentService
@@ -87,7 +89,26 @@ async def tell(
         runtime = await heartflow_manager.get_or_create_heartflow_chat(target)
         receipt = runtime.enqueue_internal_task(source_kind=service.relay_kind, text=relay_text, reason=service.name + "传话", images=media)
     else:
-        receipt = {"task_id": await agent.enqueue(relay_text, media), "queued": True}
+        receipt = {"task_id": await agent.enqueue(relay_text, media, reply_to=caller), "queued": True,
+                   "paused": service.paused}
+        if service.paused:
+            receipt["error"] = service.error
+            receipt["notice"] = "Agent 已暂停，消息仅入队；请在 WebUI 恢复后执行。"
     return {"delivered": True, "relay_id": relay_id, "target": target,
             "name": chat_manager.get_session_name(target) if from_agent else service.name,
             "images": attachments, **receipt}
+
+
+async def report_failure(service: "AgentService", target: str, task_ids: List[str], error: str) -> None:
+    """将失败事实回报给原聊天的 Planner，不冒充外部 Agent 的回复。"""
+    from src.chat.heart_flow.heartflow_manager import heartflow_manager
+
+    resolve_chat(target)
+    path = Path(__file__).parent / "prompts" / "acp" / f"{get_locale()}.failure.txt"
+    template = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    runtime = await heartflow_manager.get_or_create_heartflow_chat(target)
+    runtime.enqueue_internal_task(
+        source_kind=service.relay_kind,
+        text=template.format(name=service.name, task_ids=", ".join(task_ids), error=error),
+        reason=service.name + "执行失败",
+    )

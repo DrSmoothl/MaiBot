@@ -12,8 +12,12 @@ import tomlkit
 from src.common.paths import get_instance_root
 from src.common.i18n import t
 from src.common.logger import get_logger
+from src.common.http_service.config import HTTPConfig
 from src.common.version import read_project_version
 from src.agent.config import AgentConfig
+from src.computer.config import ComputerConfig
+from src.desktop_pet.config import DesktopPetConfig
+from src.files.config import FilesConfig
 from src.web_search.config import WebConfig, resolve_web_search_config
 
 from .config_base import AttributeData, ConfigBase, Field
@@ -34,7 +38,6 @@ from .official_configs import (
     CapabilitiesConfig,
     ChatConfig,
     ChineseTypoConfig,
-    DatabaseConfig,
     DebugConfig,
     EmojiConfig,
     ExperimentalConfig,
@@ -70,10 +73,9 @@ CONFIG_DIR: Path = PROJECT_ROOT / "config"
 BOT_CONFIG_PATH: Path = (CONFIG_DIR / "bot_config.toml").resolve().absolute()
 MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute()
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
-A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.47"
-MODEL_CONFIG_VERSION: str = "1.17.24"
+CONFIG_VERSION: str = "8.15.59"
+MODEL_CONFIG_VERSION: str = "1.17.25"
 
 logger = get_logger("config")
 
@@ -100,6 +102,18 @@ class Config(ConfigBase):
 
     agent: AgentConfig = Field(default_factory=AgentConfig)
     """统一独立 Agent 配置"""
+
+    computer: ComputerConfig = Field(default_factory=ComputerConfig)
+    """共享沙盒电脑配置"""
+
+    desktop_pet: DesktopPetConfig = Field(default_factory=DesktopPetConfig)
+    """内置桌宠配置"""
+
+    http: HTTPConfig = Field(default_factory=HTTPConfig)
+    """共享后端 HTTP 监听配置"""
+
+    files: FilesConfig = Field(default_factory=FilesConfig)
+    """文件存储、传输和清理配置"""
 
     bot: BotConfig = Field(default_factory=BotConfig)
     """机器人配置类"""
@@ -164,9 +178,6 @@ class Config(ConfigBase):
     webui: WebUIConfig = Field(default_factory=WebUIConfig)
     """WebUI配置类"""
 
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    """数据库配置类"""
-
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     """MCP 配置类"""
 
@@ -229,59 +240,12 @@ class ModelConfig(ConfigBase):
         return super().model_post_init(context)
 
 
-def _normalize_a_memorix_legacy_config(config_data: dict[str, Any]) -> dict[str, Any]:
+def _normalize_a_memorix_config(config_data: dict[str, Any]) -> dict[str, Any]:
+    """将当前 TOML 中的 web.import 映射为 Python 属性 web.import_config。"""
     normalized = copy.deepcopy(config_data)
     web_config = normalized.get("web")
     if isinstance(web_config, dict) and "import" in web_config and "import_config" not in web_config:
         web_config["import_config"] = web_config.pop("import")
-    return normalized
-
-
-def _migrate_legacy_a_memorix_config(config_data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    if isinstance(config_data.get("a_memorix"), dict):
-        return config_data, False
-    if not A_MEMORIX_LEGACY_CONFIG_PATH.exists():
-        return config_data, False
-
-    try:
-        with A_MEMORIX_LEGACY_CONFIG_PATH.open("r", encoding="utf-8") as handle:
-            legacy_data = tomlkit.load(handle).unwrap()
-    except Exception as exc:
-        logger.warning(f"读取旧版 A_Memorix 配置失败，已使用主配置默认值: {A_MEMORIX_LEGACY_CONFIG_PATH}，原因: {exc}")
-        return config_data, False
-
-    if not isinstance(legacy_data, dict):
-        logger.warning(f"旧版 A_Memorix 配置内容无效，已使用主配置默认值: {A_MEMORIX_LEGACY_CONFIG_PATH}")
-        return config_data, False
-
-    migrated_data = copy.deepcopy(config_data)
-    migrated_data["a_memorix"] = _normalize_a_memorix_legacy_config(legacy_data)
-    logger.warning(
-        f"检测到旧版 A_Memorix 配置，已迁移到 bot_config.toml 的 [a_memorix]: {A_MEMORIX_LEGACY_CONFIG_PATH}"
-    )
-    return migrated_data, True
-
-
-def _normalize_loaded_bot_config_dict(config_data: dict[str, Any]) -> dict[str, Any]:
-    normalized = copy.deepcopy(config_data)
-    # 将已稳定的能力配置移入独立栏目，保留用户原有开关与阈值。
-    experimental_config = normalized.get("experimental")
-    if isinstance(experimental_config, dict):
-        if "replyer_retro_prompt" in experimental_config:
-            normalized.setdefault("debug", {}).setdefault(
-                "replyer_retro_prompt", experimental_config.pop("replyer_retro_prompt")
-            )
-        for field_name in (
-            "tool_result_condense",
-            "tool_result_condense_threshold",
-            "planner_subagent",
-            "advanced_sub_agent",
-        ):
-            if field_name in experimental_config:
-                normalized.setdefault("capabilities", {}).setdefault(field_name, experimental_config.pop(field_name))
-    a_memorix_config = normalized.get("a_memorix")
-    if isinstance(a_memorix_config, dict):
-        normalized["a_memorix"] = _normalize_a_memorix_legacy_config(a_memorix_config)
     return normalized
 
 
@@ -817,7 +781,6 @@ def load_config_from_file(
     old_ver: str = inner_version
     env_migration_applied: bool = False
     legacy_config_migration_applied: bool = False
-    a_memorix_migration_applied: bool = False
     upgrade_hook_applied: bool = False
     legacy_config_migration_reasons: list[str] = []
     config_data.remove("inner")  # 移除 inner 部分，避免干扰后续处理
@@ -836,11 +799,8 @@ def load_config_from_file(
             legacy_config_migration_applied = True
             legacy_config_migration_reasons.append(legacy_migration.reason)
         config_data = legacy_migration.data
-        config_data, a_memorix_migration_applied = _migrate_legacy_a_memorix_config(config_data)
-        if a_memorix_migration_applied:
-            legacy_config_migration_reasons.append("a_memorix_legacy_config")
-    if config_class is Config:
-        config_data = _normalize_loaded_bot_config_dict(config_data)
+    if config_class is Config and isinstance(config_data.get("a_memorix"), dict):
+        config_data["a_memorix"] = _normalize_a_memorix_config(config_data["a_memorix"])
     hook_result = apply_config_upgrade_hooks(config_data, config_path.name, old_ver, new_ver)
     upgrade_hook_applied = hook_result.migrated
     if hook_result.migrated:
@@ -871,7 +831,6 @@ def load_config_from_file(
             compare_versions(old_ver, new_ver)
             or env_migration_applied
             or legacy_config_migration_applied
-            or a_memorix_migration_applied
             or upgrade_hook_applied
         ):
             output_config_changes(attribute_data, logger, old_ver, new_ver, config_path.name)
@@ -881,7 +840,7 @@ def load_config_from_file(
             updated = True
         if legacy_migration_enabled:
             mark_legacy_config_migration_completed(
-                migrated=env_migration_applied or legacy_config_migration_applied or a_memorix_migration_applied,
+                migrated=env_migration_applied or legacy_config_migration_applied,
                 reason=",".join(reason for reason in legacy_config_migration_reasons if reason),
             )
         return target_config, updated

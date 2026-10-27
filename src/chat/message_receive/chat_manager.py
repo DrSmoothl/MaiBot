@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import asyncio
+import threading
 
 from rich.traceback import install
 from sqlmodel import select
@@ -84,6 +85,7 @@ class ChatManager:
 
     def __init__(self) -> None:
         self.sessions: Dict[str, BotChatSession] = {}  # session_id -> BotChatSession
+        self._session_creation_lock = threading.RLock()
         self.last_messages: Dict[str, "SessionMessage"] = {}  # session_id -> SessionMessage
 
     async def initialize(self):
@@ -95,6 +97,20 @@ class ChatManager:
             logger.error(f"初始化聊天管理器出现错误: {e}")
 
     async def get_or_create_session(
+        self,
+        platform: str,
+        user_id: str,
+        group_id: Optional[str] = None,
+        account_id: Optional[str] = None,
+        scope: Optional[str] = None,
+    ) -> BotChatSession:
+        """聊天和 WebUI 上传共用正式创建链路，数据库访问放在线程池。"""
+        def create() -> BotChatSession:
+            with self._session_creation_lock:
+                return self._get_or_create_session(platform, user_id, group_id, account_id, scope)
+        return await asyncio.to_thread(create)
+
+    def _get_or_create_session(
         self,
         platform: str,
         user_id: str,

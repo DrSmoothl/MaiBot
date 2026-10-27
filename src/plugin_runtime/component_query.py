@@ -965,6 +965,16 @@ class ComponentQueryService:
             )
         invoke_payload = self._build_tool_invocation_payload(tool_entry, invocation, context)
 
+        from src.files.service import get_file_service
+
+        file_service = get_file_service()
+        file_scope = ""
+        if file_service.enabled and context is not None and context.session_id:
+            file_scope = file_service.ticket("plugin", lifetime=3600, plugin_id=tool_entry.plugin_id,
+                                             session_id=context.session_id)
+        # 保留字段覆盖调用参数，插件无法从模型参数选择任意聊天权限。
+        invoke_payload["_file_scope"] = file_scope
+
         try:
             response = await supervisor.invoke_plugin(
                 method=tool_entry.invoke_method,
@@ -981,6 +991,9 @@ class ComponentQueryService:
                 error_message=str(exc),
                 metadata={"plugin_id": tool_entry.plugin_id},
             )
+
+        finally:
+            file_service.revoke(file_scope)
 
         payload = response.payload if isinstance(response.payload, dict) else {}
         transport_success = bool(payload.get("success", False))

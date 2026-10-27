@@ -377,7 +377,8 @@ class AMemorixHostService:
                 self._startup_error_stage = "startup_migration"
             kernel = SDKMemoryKernel(plugin_root=repo_root(), config=config)
             await kernel.initialize()
-            async with self._lock:
+            # 等待启动期写入落盘后再发布就绪状态，避免回放快照漏掉正在入队的记录。
+            async with self._queue_lock, self._lock:
                 self._kernel = kernel
                 self._runtime_state = "ready"
                 self._startup_error = ""
@@ -508,7 +509,7 @@ class AMemorixHostService:
             component_name = str(item.get("component_name", "") or "").strip()
             if not record_id or record_id in done_ids:
                 continue
-            if component_name not in {"ingest_summary", "ingest_text", "image_memory"}:
+            if component_name not in {"ingest_summary", "ingest_text", "image_memory", "memory_profile_admin"}:
                 continue
             records.append(item)
         records.sort(key=lambda item: float(item.get("created_at", 0.0) or 0.0))
@@ -563,8 +564,15 @@ class AMemorixHostService:
             "payload": queued_payload,
             "created_at": time.time(),
         }
-        await self._append_jsonl(self._startup_queue_path(), record)
-        self._startup_queue_pending_count += 1
+        async with self._queue_lock:
+            # 等锁期间可能已经完成初始化，此时直接执行，不能写入已读取过的启动队列。
+            if self._runtime_state in {"starting", "migrating"}:
+                await asyncio.to_thread(self._append_jsonl_sync, self._startup_queue_path(), record)
+                self._startup_queue_pending_count += 1
+            else:
+                record = None
+        if record is None:
+            return await self._invoke(component_name, payload)
         return {
             "success": True,
             "queued": True,
@@ -584,7 +592,11 @@ class AMemorixHostService:
             "ingest",
             "describe",
         }
-        if initializing and (component_name in {"ingest_summary", "ingest_text"} or image_write):
+        identity_write = (
+            component_name == "memory_profile_admin"
+            and str(payload.get("action") or "").strip().lower() == "observe_identity"
+        )
+        if initializing and (component_name in {"ingest_summary", "ingest_text"} or image_write or identity_write):
             return await self._enqueue_startup_write(component_name, payload)
 
         reason = "a_memorix_initializing" if initializing else "a_memorix_initialization_failed"
@@ -622,6 +634,11 @@ class AMemorixHostService:
     async def _dispatch_ingest_write(
         self, kernel: SDKMemoryKernel, component_name: str, payload: Dict[str, Any]
     ) -> Any:
+        if component_name == "memory_profile_admin":
+            command = parse_admin_command(component_name, payload)
+            if command.action != "observe_identity":
+                raise ValueError(f"不支持的启动队列身份写入操作: {command.action}")
+            return await dispatch_admin_command(kernel, command)
         if component_name == "ingest_summary":
             return await kernel.ingest_summary(
                 external_id=str(payload.get("external_id", "") or ""),
@@ -671,6 +688,7 @@ class AMemorixHostService:
         if not records:
             return
         logger.info(f"A_Memorix 开始回放启动写入队列: pending={len(records)}")
+        failure_counts: Dict[str, int] = {}
         for record in records:
             record_id = str(record.get("record_id", "") or "").strip()
             component_name = str(record.get("component_name", "") or "").strip()
@@ -699,7 +717,20 @@ class AMemorixHostService:
                         "error": str(exc),
                     },
                 )
-                logger.warning(f"A_Memorix 启动队列回放失败: record={record_id}, error={exc}")
+                error = str(exc)
+                failure_counts[error] = failure_counts.get(error, 0) + 1
+
+        if failure_counts:
+            failed_count = sum(failure_counts.values())
+            # 控制汇总长度，完整的逐条错误保留在失败记录文件中。
+            reasons = sorted(failure_counts.items(), key=lambda item: item[1], reverse=True)
+            summary = "；".join(f"{' '.join(error.split())[:120]}（{count} 条）" for error, count in reasons[:3])
+            if len(reasons) > 3:
+                summary += f"；另有 {len(reasons) - 3} 种原因"
+            logger.warning(
+                f"A_Memorix 启动队列回放完成: 成功={len(records) - failed_count}, 失败={failed_count}；"
+                f"原因: {summary}；详细记录: {self._startup_queue_failed_path()}"
+            )
 
     @staticmethod
     def _config_model_to_runtime_dict(config_model: AMemorixConfig) -> Dict[str, Any]:

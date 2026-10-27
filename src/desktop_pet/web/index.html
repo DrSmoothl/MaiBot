@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>desktop-pet</title>
+<style>
+  :root {
+    --ink: #1d1d1b;
+    --orange: #ec9341;
+    --cream: #f4e0c6;
+    --leaf: #8dc85c;
+    --paper: #fff8ec;
+    --paper-2: #f6e6cf;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    color: var(--ink);
+    font: 13px/1.55 "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    user-select: none;
+  }
+
+  #stage { position: relative; width: 100%; height: 100%; }
+
+  /* ---------- 桌宠 ---------- */
+  #pet {
+    position: absolute;
+    left: 55px;
+    bottom: 4px;
+    width: 150px;
+    height: 107px;
+    overflow: visible;
+    cursor: grab;
+    touch-action: none;
+  }
+  .dragging #pet { cursor: grabbing; }
+
+  #float { animation: bob 3.2s ease-in-out infinite; }
+  .dragging #float { animation-play-state: paused; }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+
+  #squash { transform-origin: 120px 141px; transition: transform .18s ease-out; }
+  .squish #squash { animation: squish .38s ease-out; }
+  .happy #squash { animation: hop .62s cubic-bezier(.3, .6, .4, 1); }
+  .shake #squash { animation: shake .5s ease-in-out; }
+  .dragging #squash { transform: translateY(-4px) rotate(-9deg); }
+  @keyframes squish {
+    0% { transform: scale(1, 1); }
+    30% { transform: scale(1.09, .88); }
+    62% { transform: scale(.96, 1.05); }
+    100% { transform: scale(1, 1); }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-4px) rotate(-3deg); }
+    40%, 80% { transform: translateX(4px) rotate(3deg); }
+  }
+  @keyframes hop {
+    0% { transform: translateY(0) scale(1, 1); }
+    18% { transform: translateY(0) scale(1.08, .9); }
+    45% { transform: translateY(-14px) scale(.96, 1.05); }
+    75% { transform: translateY(0) scale(1.06, .93); }
+    100% { transform: translateY(0) scale(1, 1); }
+  }
+
+  #tail { transform-origin: 44px 95px; animation: wag 1.8s ease-in-out infinite; }
+  #pet:hover #tail, .dragging #tail, .happy #tail { animation-duration: .5s; }
+  @keyframes wag {
+    0%, 100% { transform: rotate(-7deg); }
+    50% { transform: rotate(8deg); }
+  }
+
+  #sprout { transform-origin: 146px 46px; animation: sway 2.6s ease-in-out infinite; }
+  #pet:hover #sprout { animation-duration: 1.1s; }
+  @keyframes sway {
+    0%, 100% { transform: rotate(-5deg); }
+    50% { transform: rotate(6deg); }
+  }
+  #leaves { transform-origin: 146px 20px; }
+  .thinking #leaves { animation: spin .55s linear infinite; }
+  @keyframes spin {
+    0%, 100% { transform: scaleX(1); }
+    50% { transform: scaleX(-1); }
+  }
+
+  .eye-open { transform-box: fill-box; transform-origin: center; }
+  .blink .eye-open { animation: blink .2s ease-in-out; }
+  @keyframes blink {
+    0%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(.08); }
+  }
+  .pupil {
+    transform: translate(var(--px, 0px), var(--py, 0px));
+    transition: transform .3s ease-out;
+  }
+  .thinking .pupil { transform: translate(1px, -2.2px); }
+  .eye-happy { display: none; }
+  .happy .eye-open { display: none; }
+  .happy .eye-happy { display: inline; }
+
+  #jaw { transition: transform .1s; }
+  #mouth { opacity: 0; }
+  .talking #jaw { animation: chomp .24s ease-in-out infinite alternate; }
+  .talking #mouth { animation: mouth .24s ease-in-out infinite alternate; }
+  @keyframes chomp { to { transform: translateY(2.6px); } }
+  @keyframes mouth { to { opacity: 1; } }
+
+  /* ---------- 菜单按钮 ---------- */
+  .orb {
+    position: absolute;
+    bottom: 112px;
+    width: 46px;
+    height: 46px;
+    display: none;
+    place-items: center;
+    padding: 0;
+    border: 2.2px solid var(--ink);
+    border-radius: 50%;
+    box-shadow: 0 3px 0 var(--ink);
+    cursor: pointer;
+    transition: transform .12s, box-shadow .12s;
+  }
+  .orb svg { width: 26px; height: 26px; }
+  .orb:hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--ink); }
+  .orb:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+  #orb-chat { left: 92px; background: var(--orange); --from: 44px 22px; }
+  #orb-todo { left: 166px; background: var(--leaf); --from: -30px 22px; }
+  [data-mode="menu"] .orb { display: grid; animation: pop .34s cubic-bezier(.3, 1.6, .5, 1) both; }
+  [data-mode="menu"] #orb-todo { animation-delay: .05s; }
+  @keyframes pop {
+    from { opacity: 0; translate: var(--from); scale: .3; }
+    to { opacity: 1; translate: 0 0; scale: 1; }
+  }
+
+  /* ---------- 气泡 ---------- */
+  .bubble {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 116px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    max-height: 196px;
+    background: var(--paper);
+    border: 2.2px solid var(--ink);
+    border-radius: 18px;
+    box-shadow: 0 3px 0 var(--ink);
+    animation: rise .22s cubic-bezier(.3, 1.4, .5, 1) both;
+  }
+  .bubble::after {
+    content: "";
+    position: absolute;
+    left: 136px;
+    bottom: -9px;
+    width: 14px;
+    height: 14px;
+    background: var(--paper);
+    border-right: 2.2px solid var(--ink);
+    border-bottom: 2.2px solid var(--ink);
+    transform: rotate(45deg);
+    border-bottom-right-radius: 3px;
+  }
+  [data-mode="chat"] #chat, [data-mode="todo"] #todo { display: flex; }
+  @keyframes rise {
+    from { opacity: 0; translate: 0 10px; }
+    to { opacity: 1; translate: 0 0; }
+  }
+
+  .scroll {
+    overflow-y: auto;
+    min-height: 0;
+    flex: 1 1 auto;
+    margin-right: -4px;
+    padding-right: 4px;
+  }
+  .scroll:empty { display: none; }
+  .scroll::-webkit-scrollbar { width: 5px; }
+  .scroll::-webkit-scrollbar-thumb { background: #dcc4a3; border-radius: 3px; }
+
+  input {
+    width: 100%;
+    padding: 6px 11px;
+    border: 2px solid var(--ink);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    outline: none;
+    caret-color: var(--orange);
+    user-select: text;
+  }
+  input:focus { box-shadow: 0 0 0 3px rgba(236, 147, 65, .35); }
+
+  /* 对话 */
+  #log { display: flex; flex-direction: column; gap: 6px; }
+  .line { max-width: 86%; word-break: break-word; white-space: pre-wrap; user-select: text; }
+  .line.me {
+    align-self: flex-end;
+    padding: 3px 10px;
+    border-radius: 12px 12px 4px 12px;
+    background: var(--paper-2);
+  }
+  .line.mai { align-self: flex-start; }
+  .line img { display: block; max-width: 140px; max-height: 120px; border-radius: 8px; }
+  .dots { display: flex; gap: 4px; padding: 6px 2px; align-self: flex-start; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); animation: dot 1s ease-in-out infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; }
+  .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes dot {
+    0%, 60%, 100% { transform: translateY(0); opacity: .5; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+
+  /* 待办 */
+  #todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  #todos li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 2px 0;
+    transition: opacity .35s .3s;
+  }
+  #todos li span { flex: 1; word-break: break-word; user-select: text; transition: color .2s; }
+  .tick {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 2px solid var(--ink);
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+  }
+  .tick svg { width: 12px; height: 12px; opacity: 0; transform: scale(.4); transition: opacity .15s, transform .2s cubic-bezier(.3, 1.6, .5, 1); }
+  .tick:hover { background: #e6f3da; }
+  #todos li.done .tick { background: var(--leaf); }
+  #todos li.done .tick svg { opacity: 1; transform: scale(1); }
+  #todos li.done span { color: #a59783; text-decoration: line-through; }
+  #todos li.done { opacity: 0; }
+
+  /* 主动说话 */
+  #say-wrap {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 116px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+  #say {
+    position: relative;
+    display: none;
+    max-width: 100%;
+    max-height: 196px;
+    overflow: hidden;
+    padding: 8px 12px;
+    background: var(--paper);
+    border: 2.2px solid var(--ink);
+    border-radius: 16px;
+    box-shadow: 0 3px 0 var(--ink);
+    pointer-events: auto;
+    cursor: pointer;
+    animation: rise .22s cubic-bezier(.3, 1.4, .5, 1) both;
+  }
+  #say.show { display: block; }
+  [data-mode="chat"] #say, [data-mode="todo"] #say, [data-mode="menu"] #say { display: none; }
+  #say .line { max-width: none; }
+  #say .line + .line { margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="stage" data-mode="idle">
+
+  <svg id="pet" data-hit="34" viewBox="0 0 210 150" aria-hidden="true">
+    <defs>
+      <path id="body-shape" d="M39 96C39 68 72 48 128 44C174 41 201 64 201 93C201 124 172 141 127 141C74 141 39 124 39 96Z"/>
+      <clipPath id="body-clip"><use href="#body-shape"/></clipPath>
+      <path id="lobe" d="M0 0C-6 -6 -17 -13 -17 -22C-17 -29 -11 -33 -6 -31C-3 -30 -1 -28 0 -25C1 -28 3 -30 6 -31C11 -33 17 -29 17 -22C17 -13 6 -6 0 0Z"/>
+    </defs>
+    <g id="float">
+      <g id="squash">
+        <g id="tail" fill="var(--leaf)">
+          <use href="#lobe" transform="translate(42 92) scale(1.02 1.22)"/>
+          <use href="#lobe" transform="translate(45 94) rotate(-90) scale(1.02 1.2)"/>
+          <use href="#lobe" transform="translate(42 96) rotate(180) scale(1.02 1.18)"/>
+        </g>
+        <g id="sprout" stroke="var(--ink)" stroke-width="1.7" stroke-linejoin="round" fill="var(--leaf)">
+          <path d="M143.6 47C144.2 38 143.8 29 143.4 21H148.4C148.6 29 149.2 38 149 47Z"/>
+          <g id="leaves">
+            <ellipse cx="129.5" cy="15.5" rx="16.5" ry="9.4" transform="rotate(-7 129.5 15.5)"/>
+            <ellipse cx="163.5" cy="18" rx="17.2" ry="9.6" transform="rotate(5 163.5 18)"/>
+          </g>
+        </g>
+        <g id="body">
+          <use href="#body-shape" fill="var(--orange)"/>
+          <path d="M20 99L215 101.5V150H20Z" fill="var(--cream)" clip-path="url(#body-clip)"/>
+          <use href="#body-shape" fill="none" stroke="var(--ink)" stroke-width="1.9"/>
+        </g>
+        <g id="face">
+          <g class="eye-open">
+            <circle cx="135" cy="85" r="8" fill="#fff" stroke="var(--ink)" stroke-width="1.7"/>
+            <circle class="pupil" cx="135" cy="85" r="4.6" fill="var(--ink)"/>
+          </g>
+          <g class="eye-open">
+            <circle cx="177.5" cy="85" r="8" fill="#fff" stroke="var(--ink)" stroke-width="1.7"/>
+            <circle class="pupil" cx="177.5" cy="85" r="4.6" fill="var(--ink)"/>
+          </g>
+          <g class="eye-happy" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round">
+            <path d="M128.5 88Q135 79.5 141.5 88"/>
+            <path d="M171 88Q177.5 79.5 184 88"/>
+          </g>
+          <ellipse id="mouth" cx="157.3" cy="112" rx="4.2" ry="3" fill="#b8473f"/>
+          <g fill="var(--ink)" stroke="var(--ink)" stroke-width="1.4" stroke-linejoin="round">
+            <path d="M148.6 106H166L162.1 111H152.5Z"/>
+            <path id="jaw" d="M152.5 111.4H162.1L157.3 116.4Z"/>
+          </g>
+        </g>
+      </g>
+    </g>
+  </svg>
+
+  <button id="orb-chat" class="orb" data-hit="23" aria-label="chat">
+    <svg viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round">
+      <path d="M4.5 7C4.5 5.3 5.8 4 7.5 4H16.5C18.2 4 19.5 5.3 19.5 7V12.5C19.5 14.2 18.2 15.5 16.5 15.5H11.5L7.5 19V15.5C5.8 15.5 4.5 14.2 4.5 12.5Z" fill="var(--paper)"/>
+      <circle cx="9" cy="9.8" r=".9" fill="var(--ink)" stroke="none"/>
+      <circle cx="12" cy="9.8" r=".9" fill="var(--ink)" stroke="none"/>
+      <circle cx="15" cy="9.8" r=".9" fill="var(--ink)" stroke="none"/>
+    </svg>
+  </button>
+  <button id="orb-todo" class="orb" data-hit="23" aria-label="todo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4.5" y="4.5" width="15" height="15" rx="4" fill="var(--paper)"/>
+      <path d="M8.5 12.3L11 14.8L15.8 9.5" stroke-width="2.3"/>
+    </svg>
+  </button>
+
+  <div id="chat" class="bubble" data-hit="18">
+    <div id="log" class="scroll"></div>
+    <form id="chat-form"><input id="chat-input" maxlength="500" autocomplete="off" spellcheck="false"></form>
+  </div>
+
+  <div id="todo" class="bubble" data-hit="18">
+    <ul id="todos" class="scroll"></ul>
+    <form id="todo-form"><input id="todo-input" maxlength="200" autocomplete="off" spellcheck="false"></form>
+  </div>
+
+  <div id="say-wrap"><div id="say" data-hit="16"></div></div>
+</div>
+
+<template id="tick-tpl">
+  <button class="tick"><svg viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 6.2L5 8.5L9.4 3.6"/></svg></button>
+</template>
+
+<script>
+(() => {
+  const stage = document.getElementById("stage");
+  const pet = document.getElementById("pet");
+  const log = document.getElementById("log");
+  const chatInput = document.getElementById("chat-input");
+  const todoList = document.getElementById("todos");
+  const todoInput = document.getElementById("todo-input");
+  const say = document.getElementById("say");
+  const pupils = document.querySelectorAll(".pupil");
+
+  const MAX_LOG = 30;
+  const WAIT_LIMIT_MS = 120000;
+
+  let api = null;
+  let waitTimer = 0;
+  let sayTimer = 0;
+
+  // ---------- 点击区域 ----------
+  // 窗口只在桌宠和气泡处接收鼠标，其余透明处交还给桌面。
+  let regionFrame = 0;
+  // 用不受 transform 影响的布局盒计算，弹出动画进行中也按最终大小放行点击。
+  function layoutBox(el) {
+    if (el instanceof SVGElement) {
+      const rect = el.getBoundingClientRect();
+      return [rect.left, rect.top, rect.width, rect.height];
+    }
+    let x = 0, y = 0;
+    for (let node = el; node; node = node.offsetParent) {
+      x += node.offsetLeft;
+      y += node.offsetTop;
+    }
+    return [x, y, el.offsetWidth, el.offsetHeight];
+  }
+  function updateRegion() {
+    cancelAnimationFrame(regionFrame);
+    regionFrame = requestAnimationFrame(() => {
+      if (!api) return;
+      const pad = 8;
+      const rects = [];
+      for (const el of document.querySelectorAll("[data-hit]")) {
+        if (getComputedStyle(el).display === "none") continue;
+        const [x, y, w, h] = layoutBox(el);
+        if (!w || !h) continue;
+        rects.push([x - pad, y - pad, w + pad * 2, h + pad * 2, Number(el.dataset.hit) + pad]);
+      }
+      api.region(rects, devicePixelRatio);
+    });
+  }
+
+  // ---------- 模式 ----------
+  function setMode(mode) {
+    if (stage.dataset.mode === mode) return;
+    stage.dataset.mode = mode;
+    if (mode === "chat") {
+      hideSay();
+      chatInput.focus();
+      scrollLog();
+    } else if (mode === "todo") {
+      todoInput.focus();
+      todoList.scrollTop = todoList.scrollHeight;
+    }
+    look(mode === "chat" || mode === "todo" ? [-0.6, -2] : [0, 0]);
+    updateRegion();
+  }
+
+  // ---------- 表情 ----------
+  function flash(name, ms) {
+    stage.classList.remove(name);
+    void stage.offsetWidth;
+    stage.classList.add(name);
+    clearTimeout(flash[name]);
+    flash[name] = setTimeout(() => stage.classList.remove(name), ms);
+  }
+  function look([x, y]) {
+    for (const pupil of pupils) {
+      pupil.style.setProperty("--px", `${x}px`);
+      pupil.style.setProperty("--py", `${y}px`);
+    }
+  }
+  function blinkLoop() {
+    flash("blink", 200);
+    setTimeout(blinkLoop, 2400 + Math.random() * 3600);
+  }
+  function lookLoop() {
+    if (stage.dataset.mode === "idle" && !stage.classList.contains("dragging")) {
+      const glances = [[0, 0], [2, 0.6], [-2, 0.4], [1.4, -1.6], [-1.2, 1.4], [0, 0]];
+      look(glances[Math.floor(Math.random() * glances.length)]);
+    }
+    setTimeout(lookLoop, 3500 + Math.random() * 5000);
+  }
+
+  // ---------- 拖动与点击 ----------
+  // 窗口由宿主按光标物理坐标移动；拖动调用串行执行，拖得快时合并为一次移动，避免积压。
+  let drag = null;
+  let dragChain = Promise.resolve();
+  let moveQueued = false;
+  function queueDrag(step) {
+    dragChain = dragChain.then(step).catch((error) => console.error(error));
+  }
+  pet.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !api) return;
+    pet.setPointerCapture(event.pointerId);
+    drag = { sx: event.screenX, sy: event.screenY, moved: false };
+    queueDrag(() => api.drag_begin());
+  });
+  pet.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.hypot(event.screenX - drag.sx, event.screenY - drag.sy) < 5) return;
+      drag.moved = true;
+      stage.classList.add("dragging");
+      look([0, 2]);
+      setMode("idle");
+    }
+    if (moveQueued) return;
+    moveQueued = true;
+    queueDrag(() => {
+      moveQueued = false;
+      return api.drag_move();
+    });
+  });
+  pet.addEventListener("pointerup", () => {
+    if (!drag) return;
+    const { moved } = drag;
+    drag = null;
+    if (moved) {
+      stage.classList.remove("dragging");
+      look([0, 0]);
+      queueDrag(() => api.drag_end());
+      return;
+    }
+    flash("squish", 400);
+    const mode = stage.dataset.mode;
+    setMode(mode === "idle" ? "menu" : "idle");
+  });
+  pet.addEventListener("pointercancel", () => {
+    drag = null;
+    stage.classList.remove("dragging");
+  });
+
+  document.getElementById("orb-chat").addEventListener("click", () => setMode("chat"));
+  document.getElementById("orb-todo").addEventListener("click", () => setMode("todo"));
+  say.addEventListener("click", () => setMode("chat"));
+
+  window.addEventListener("blur", () => {
+    if (!drag && stage.dataset.mode !== "idle") setMode("idle");
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setMode("idle");
+  });
+  document.addEventListener("contextmenu", (event) => event.preventDefault());
+  document.addEventListener("wheel", (event) => { if (event.ctrlKey) event.preventDefault(); }, { passive: false });
+
+  // ---------- 对话 ----------
+  function scrollLog() {
+    log.scrollTop = log.scrollHeight;
+  }
+  function lineNode(who, parts) {
+    const line = document.createElement("div");
+    line.className = `line ${who}`;
+    for (const part of parts) {
+      if (part.kind === "image") {
+        const img = document.createElement("img");
+        img.src = part.src;
+        img.addEventListener("load", () => { scrollLog(); updateRegion(); });
+        line.append(img);
+      } else {
+        line.append(part.text);
+      }
+    }
+    return line;
+  }
+  function pushLine(who, parts) {
+    log.querySelector(".dots")?.remove();
+    log.append(lineNode(who, parts));
+    while (log.childElementCount > MAX_LOG) log.firstElementChild.remove();
+    if (waitTimer) log.append(dotsNode());
+    scrollLog();
+    updateRegion();
+  }
+  function dotsNode() {
+    const dots = document.createElement("div");
+    dots.className = "dots";
+    dots.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
+    return dots;
+  }
+  function stopWaiting() {
+    clearTimeout(waitTimer);
+    waitTimer = 0;
+    stage.classList.remove("thinking");
+    log.querySelector(".dots")?.remove();
+  }
+  document.getElementById("chat-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text || !api) return;
+    chatInput.value = "";
+    api.send(text);
+    clearTimeout(waitTimer);
+    waitTimer = setTimeout(stopWaiting, WAIT_LIMIT_MS);
+    pushLine("me", [{ kind: "text", text }]);
+    flash("squish", 400);
+  });
+
+  function hideSay() {
+    clearTimeout(sayTimer);
+    say.classList.remove("show");
+    say.replaceChildren();
+    updateRegion();
+  }
+  function showSay(parts) {
+    say.append(lineNode("mai", parts));
+    while (say.childElementCount > 3) say.firstElementChild.remove();
+    say.classList.add("show");
+    const length = say.textContent.length;
+    clearTimeout(sayTimer);
+    sayTimer = setTimeout(hideSay, Math.min(15000, Math.max(4000, 2500 + length * 140)));
+    updateRegion();
+  }
+  function speak(parts) {
+    stopWaiting();
+    pushLine("mai", parts);
+    if (stage.dataset.mode !== "chat") showSay(parts);
+    const length = parts.reduce((sum, part) => sum + (part.kind === "text" ? part.text.length : 4), 0);
+    flash("talking", Math.min(3000, 500 + length * 70));
+  }
+
+  // ---------- 待办 ----------
+  function todoNode(item) {
+    const li = document.createElement("li");
+    const tick = document.getElementById("tick-tpl").content.firstElementChild.cloneNode(true);
+    const text = document.createElement("span");
+    text.textContent = item.text;
+    tick.addEventListener("click", async () => {
+      if (li.classList.contains("done")) return;
+      li.classList.add("done");
+      flash("happy", 1200);
+      await api.done_todo(item.id);
+      setTimeout(() => {
+        li.remove();
+        updateRegion();
+      }, 700);
+    });
+    li.append(tick, text);
+    return li;
+  }
+  document.getElementById("todo-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = todoInput.value.trim();
+    if (!text || !api) return;
+    todoInput.value = "";
+    const item = await api.add_todo(text);
+    todoList.append(todoNode(item));
+    todoList.scrollTop = todoList.scrollHeight;
+    flash("happy", 1200);
+    updateRegion();
+  });
+
+  // ---------- 与宿主通信 ----------
+  window.pet = {
+    receive(message) {
+      if (message.type === "reply") {
+        speak(message.parts);
+      } else if (message.type === "notice") {
+        // 插件提示只显示气泡，不混入聊天记录，也不打断正在等待的聊天回复。
+        showSay(message.parts);
+        flash("talking", 1500);
+      } else if (message.type === "failed") {
+        stopWaiting();
+        flash("shake", 500);
+      } else if (message.type === "idle") {
+        stopWaiting();
+      } else if (message.type === "thinking") {
+        stage.classList.add("thinking");
+        if (!waitTimer) waitTimer = setTimeout(stopWaiting, WAIT_LIMIT_MS);
+        if (!log.querySelector(".dots")) {
+          log.append(dotsNode());
+          scrollLog();
+        }
+      }
+    },
+  };
+
+  // 系统缩放或“文本大小”变化（含拖到另一块屏幕）时，让窗口跟着页面缩放重新定尺寸。
+  function watchScale() {
+    matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener("change", async () => {
+      await api.fit(devicePixelRatio);
+      updateRegion();
+      watchScale();
+    }, { once: true });
+  }
+
+  window.addEventListener("pywebviewready", async () => {
+    api = window.pywebview.api;
+    await api.fit(devicePixelRatio);
+    watchScale();
+    for (const item of await api.todos()) todoList.append(todoNode(item));
+    const observer = new ResizeObserver(updateRegion);
+    for (const el of document.querySelectorAll("[data-hit]")) observer.observe(el);
+    updateRegion();
+    api.ready();
+  });
+
+  blinkLoop();
+  setTimeout(lookLoop, 2000);
+})();
+</script>
+</body>
+</html>

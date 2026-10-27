@@ -3,13 +3,56 @@ from unittest.mock import Mock
 
 import pytest
 
+from src.chat.debounce import MessageDebouncer
 from src.common.utils import utils_config
 from src.common.utils.utils_config import ChatConfigUtils
 from src.config.official_configs import PrivateReplyPauseRule
 from src.maisaka.focus.manager import FocusModeManager
+from src.maisaka import runtime as runtime_module
 from src.maisaka.runtime import MaisakaHeartFlowChatting
 from src.maisaka.turn_trigger import scheduler as scheduler_module
 from src.maisaka.turn_trigger.scheduler import MessageTurnScheduler
+
+
+@pytest.mark.parametrize("group_mode", ["off", "fast", "natural", "steady"])
+@pytest.mark.parametrize("private_mode", ["off", "fast", "natural", "steady"])
+def test_group_and_private_debounce_waits_and_hot_reload_are_independent(
+    monkeypatch: pytest.MonkeyPatch, group_mode: str, private_mode: str
+) -> None:
+    timing = SimpleNamespace(message_debounce_mode=group_mode, private_message_debounce_mode=private_mode)
+    monkeypatch.setattr(runtime_module, "global_config", SimpleNamespace(chat=SimpleNamespace(reply_timing=timing)))
+    monkeypatch.setattr(runtime_module.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(runtime_module, "is_bot_self", lambda platform, user_id: False)
+    monkeypatch.setattr(runtime_module, "get_message_shape", lambda message: (0, 5))
+    message = SimpleNamespace(
+        is_notify=False, is_command=False, is_at=False, is_mentioned=False,
+        platform="test", message_id="message-1",
+        message_info=SimpleNamespace(user_info=SimpleNamespace(user_id="user-1")),
+    )
+    runtimes = []
+    waits = {"off": 0.0, "fast": 1.0, "natural": 2.0, "steady": 4.0}
+    for is_group, mode in ((True, group_mode), (False, private_mode)):
+        runtime = object.__new__(MaisakaHeartFlowChatting)
+        runtime.chat_stream = SimpleNamespace(is_group_session=is_group)
+        runtime._fixed_message_debouncer = MessageDebouncer()
+        runtime._message_debounce_was_enabled = False
+        runtime.message_cache = []
+        runtime._last_processed_index = 0
+        runtime.log_prefix = "[test]"
+        runtime._observe_message_debounce(message, 1000.0)
+        assert runtime._get_message_quiet_period_remaining_seconds() == waits[mode]
+        runtimes.append(runtime)
+
+    group, private = runtimes
+    # 热重载无需新消息即可结束对应类型的等待，另一类型保持原有截止时间。
+    timing.private_message_debounce_mode = "off"
+    assert private._get_message_quiet_period_remaining_seconds() == 0.0
+    assert group._get_message_quiet_period_remaining_seconds() == waits[group_mode]
+    timing.private_message_debounce_mode = private_mode
+    timing.message_debounce_mode = "off"
+    assert group._get_message_quiet_period_remaining_seconds() == 0.0
+    assert private._get_message_quiet_period_remaining_seconds() == waits[private_mode]
 
 
 def _build_scheduler(

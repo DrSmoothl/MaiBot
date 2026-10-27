@@ -33,6 +33,8 @@ class ProcessedResponseSegment:
     quote_previous: bool = False
     # 原始文本中紧跟本段的分隔符；多条消息被压缩合并为一条时，用它恢复句间的停顿
     separator: str = ""
+    # 纠正内容始终独占一条消息，不依赖是否启用引用。
+    is_correction: bool = False
 
 
 def is_english_letter(char: str) -> bool:
@@ -94,7 +96,7 @@ def get_configured_bot_accounts() -> dict[str, str]:
     platform_accounts = parse_platform_accounts(platforms_list)
 
     for platform_name, account in platform_accounts.items():
-        if platform_name in {"qq", "webui"}:
+        if platform_name in {"qq", "webui", "internal"}:
             continue
         bot_accounts[platform_name] = account
 
@@ -465,10 +467,10 @@ def split_into_sentences_w_remove_punctuation(text: str) -> list[str]:
 
 
 def _merge_processed_segments_to_max_count(
-    segments: list[ProcessedResponseSegment],
+    segments: List[ProcessedResponseSegment],
     max_count: int,
-) -> list[ProcessedResponseSegment]:
-    """压缩回复段数量，并优先让需要引用的纠正内容保持在消息开头。"""
+) -> List[ProcessedResponseSegment]:
+    """压缩回复段数量；纠正内容独占消息所需的边界优先于条数上限。"""
 
     if len(segments) <= max_count:
         return segments
@@ -476,11 +478,16 @@ def _merge_processed_segments_to_max_count(
         return []
 
     segment_count = len(segments)
-    required_starts = [index for index, segment in enumerate(segments) if index > 0 and segment.quote_previous]
-    group_starts = {0, *required_starts[: max_count - 1]}
+    group_starts = {0}
+    for index, segment in enumerate(segments):
+        if segment.is_correction or segment.quote_previous:
+            # 同时保留纠正段前后的边界，避免它吞入后续正文；上限不足时也不能舍弃。
+            group_starts.add(index)
+            if index + 1 < segment_count:
+                group_starts.add(index + 1)
 
     # 在保留纠正消息边界后，沿用原来的均匀分组策略填充其余可用分组。
-    evenly_spaced_starts: list[int] = []
+    evenly_spaced_starts: List[int] = []
     start_index = 0
     for group_index in range(max_count):
         remaining_segments = segment_count - start_index
@@ -495,12 +502,12 @@ def _merge_processed_segments_to_max_count(
         group_starts.add(candidate_start)
 
     sorted_starts = sorted(group_starts)
-    merged_segments: list[ProcessedResponseSegment] = []
+    merged_segments: List[ProcessedResponseSegment] = []
     for group_index, group_start in enumerate(sorted_starts):
         group_end = sorted_starts[group_index + 1] if group_index + 1 < len(sorted_starts) else segment_count
         group = segments[group_start:group_end]
         # 组内多段被压缩为一条消息时，补回各段尾随的分隔符，避免多句硬拼接成无标点的一整坨
-        merged_text_parts: list[str] = []
+        merged_text_parts: List[str] = []
         for position, segment in enumerate(group):
             merged_text_parts.append(segment.text)
             if position < len(group) - 1:
@@ -510,6 +517,7 @@ def _merge_processed_segments_to_max_count(
                 text="".join(merged_text_parts),
                 quote_previous=group[0].quote_previous,
                 separator=group[-1].separator,
+                is_correction=group[0].is_correction,
             )
         )
 
@@ -555,7 +563,9 @@ def _apply_response_post_processing(
                         and random.random() < global_config.chinese_typo.correction_quote_probability
                     )
                     segments.append(ProcessedResponseSegment(typoed_text, separator=sentence_separator))
-                    segments.append(ProcessedResponseSegment(typo_corrections, quote_previous=quote_previous))
+                    segments.append(
+                        ProcessedResponseSegment(typo_corrections, quote_previous=quote_previous, is_correction=True)
+                    )
                 else:
                     segments.append(ProcessedResponseSegment(sentence, separator=sentence_separator))
             else:
@@ -631,6 +641,7 @@ def process_llm_response_segments(
                 text=recovered_text,
                 quote_previous=segment.quote_previous,
                 separator=segment.separator,
+                is_correction=segment.is_correction,
             )
             for segment, recovered_text in zip(segments, recovered_sentences, strict=True)
         ]

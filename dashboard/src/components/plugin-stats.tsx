@@ -2,6 +2,7 @@ import { DataPanel } from '@/components/ui/surface'
 import { Download, Star, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { PluginFeedback } from '@/components/plugin-feedback'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -452,9 +453,8 @@ function PluginStatsContent({
     )
   }
 
-  // 评分与评论分流：有评论内容的进入「最近评论」（同时展示其星级），仅有评分的进入「最近评分」
+  // 评分与评论分流：评论及其星级、回复由独立服务读取，仅有评分的进入「最近评分」。
   const recentRatings = stats.recent_ratings ?? []
-  const recentComments = recentRatings.filter((item) => item.comment?.trim())
   const recentRatingOnly = recentRatings.filter((item) => item.rating != null && !item.comment?.trim())
 
   return (
@@ -510,16 +510,7 @@ function PluginStatsContent({
       </div>
 
       {/* 评分与评论是两种内容：有评论文字的归入「最近评论」并保留星级，仅有评分的归入「最近评分」 */}
-      {recentComments.length > 0 && (
-        <div className="space-y-2">
-          <h4 data-plugin-stats-heading="true" className="text-sm font-semibold">最近评论</h4>
-          <div className="space-y-3">
-            {recentComments.map((item, index) => (
-              <RecentRatingItem key={`${item.user_id}-${item.created_at}-${index}`} item={item} />
-            ))}
-          </div>
-        </div>
-      )}
+      <PluginFeedback key={pluginId} pluginId={pluginId} />
 
       {recentRatingOnly.length > 0 && (
         <div className="space-y-2">

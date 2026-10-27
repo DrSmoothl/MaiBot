@@ -62,7 +62,7 @@ def verify_ws_token(temp_token: str) -> bool:
         return False
     # 验证原始 session token 仍然有效
     token_manager = get_token_manager()
-    if not token_manager.verify_token(session_token):
+    if not token_manager.verify_cookie_token(session_token):
         del _ws_temp_tokens[temp_token]
         logger.warning(f"WS token 关联的 session 已失效: {temp_token[:8]}...")
         return False
@@ -93,7 +93,7 @@ def get_ws_token(
 
     # 验证 session token
     token_manager = get_token_manager()
-    if not token_manager.verify_token(maibot_session):
+    if not token_manager.verify_cookie_token(maibot_session):
         # 同样返回 200 但 success=False，避免前端刷新
         logger.debug("ws-token 请求：认证已过期")
         return {"success": False, "message": "认证已过期，请重新登录", "token": None, "expires_in": 0}

@@ -3,6 +3,11 @@
 通过 `WebSearchToolProvider` 注册 `web_search(query, max_results=5)` 和 `web_fetch(url)`。
 服务选择、协议转换和工具实现均独立于 WebUI。默认未分配，不开放统一联网工具。
 
+插件可声明 `web.search` / `web.fetch` 能力，通过 SDK 的 `ctx.web.search(query, max_results=5)`
+和 `ctx.web.fetch(url)` 复用已分配服务。插件接口直接返回完整结构化结果，无需聊天 ID，
+不写入工具结果缓存；序列化结果超过 500000 字符时明确报错。SDK 调用示例与返回字段见
+[插件联网接口文档](https://github.com/Mai-with-u/maibot-plugin-sdk/blob/main/docs/web.md)。
+
 ## 配置
 
 在 `model_config.toml` 的独立 `web` 节配置服务实例，无需声明模型。

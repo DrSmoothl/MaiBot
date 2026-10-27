@@ -23,7 +23,7 @@ class BindAddress:
 
 
 _DEFAULT_MAIN_BIND_ADDRESS = BindAddress(hosts=["127.0.0.1"], port=8080)
-_DEFAULT_WEBUI_BIND_ADDRESS = BindAddress(hosts=["127.0.0.1", "::1"], port=8001)
+_DEFAULT_HTTP_BIND_ADDRESS = BindAddress(hosts=["127.0.0.1", "::1"], port=8001)
 _IPV4_WILDCARD_HOST = "0.0.0.0"
 _IPV6_WILDCARD_HOST = "::"
 _WILDCARD_HOSTS = {_IPV4_WILDCARD_HOST, _IPV6_WILDCARD_HOST}
@@ -98,15 +98,16 @@ def _collapse_hosts_covered_by_wildcards(hosts: list[str]) -> list[str]:
     return collapsed_hosts
 
 
-def _apply_webui_host_env(address: BindAddress) -> BindAddress:
-    webui_host_env = _parse_host_env(os.getenv("WEBUI_HOST"))
-    if webui_host_env is None:
+def _apply_http_host_env(address: BindAddress) -> BindAddress:
+    # HTTP_HOST 可追加容器或其他部署所需的监听地址。
+    http_host_env = _parse_host_env(os.getenv("HTTP_HOST"))
+    if http_host_env is None:
         return address
-    return BindAddress(hosts=_merge_host(address.hosts, webui_host_env), port=address.port)
+    return BindAddress(hosts=_merge_host(address.hosts, http_host_env), port=address.port)
 
 
-def _finalize_webui_bind_address(address: BindAddress) -> BindAddress:
-    address_with_env = _apply_webui_host_env(address)
+def _finalize_http_bind_address(address: BindAddress) -> BindAddress:
+    address_with_env = _apply_http_host_env(address)
     return BindAddress(
         hosts=_collapse_hosts_covered_by_wildcards(address_with_env.hosts),
         port=address_with_env.port,
@@ -162,18 +163,19 @@ def get_startup_main_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAd
     )
 
 
-def get_startup_webui_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
-    """读取 WebUI 绑定地址。"""
+def get_startup_http_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
+    """读取公共 HTTP 配置的绑定地址。"""
 
     config_data = _load_bootstrap_config_dict(config_path)
-    webui_config = _as_mapping(config_data.get("webui")) or {}
+    http_config = _as_mapping(config_data.get("http")) or {}
+    # 启动预检与配置加载统一读取 http 配置节。
     address = _resolve_bind_address_from_section(
-        webui_config,
+        http_config,
         host_key="host",
         port_key="port",
-        default_address=_DEFAULT_WEBUI_BIND_ADDRESS,
+        default_address=_DEFAULT_HTTP_BIND_ADDRESS,
     )
-    return _finalize_webui_bind_address(address)
+    return _finalize_http_bind_address(address)
 
 
 def resolve_main_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
@@ -188,14 +190,28 @@ def resolve_main_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddres
     return get_startup_main_bind_address(config_path)
 
 
-def resolve_webui_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
+def resolve_http_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
     """优先读取已初始化的主配置，否则回退到启动阶段配置读取。"""
 
     global_config = _get_loaded_global_config()
     if global_config is not None:
         address = BindAddress(
-            hosts=_normalize_hosts(global_config.webui.host, _DEFAULT_WEBUI_BIND_ADDRESS.hosts),
-            port=global_config.webui.port,
+            hosts=_normalize_hosts(global_config.http.host, _DEFAULT_HTTP_BIND_ADDRESS.hosts),
+            port=global_config.http.port,
         )
-        return _finalize_webui_bind_address(address)
-    return get_startup_webui_bind_address(config_path)
+        return _finalize_http_bind_address(address)
+    return get_startup_http_bind_address(config_path)
+
+
+def get_local_http_base_url() -> str:
+    """返回客户端在本机可访问的监听地址，包含环境变量合并结果。"""
+    address = resolve_http_bind_address()
+    if "127.0.0.1" in address.hosts or "0.0.0.0" in address.hosts:
+        host = "127.0.0.1"
+    elif "::1" in address.hosts or "::" in address.hosts:
+        host = "::1"
+    else:
+        host = address.hosts[0]
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{address.port}"

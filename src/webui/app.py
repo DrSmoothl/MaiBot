@@ -10,7 +10,6 @@ import gzip
 import mimetypes
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
 from src.common.paths import SOURCE_ROOT, get_instance_root
@@ -32,30 +31,10 @@ _STATISTICS_REPORT_PATH_ENV = "MAIBOT_STATISTICS_REPORT_PATH"
 _DEFAULT_STATISTICS_REPORT_PATH = "maibot_statistics.html"
 _MANUAL_INSTALL_COMMAND = f"pip install {_DASHBOARD_PACKAGE_NAME}"
 
-# 同步路由端点由 Starlette 交给 anyio 线程池执行，anyio 默认上限是 40；
-# 底层 SQLite 连接池只有 5 条常驻 + 10 条溢出连接，并发过高会让线程排队等连接，
-# 因此把同步端点的并发数限制在连接池容量以内。
-MAX_CONCURRENT_SYNC_ENDPOINTS = 8
-
 # 前端构建产物里可压缩的文本类文件；woff2、图片等本身已压缩，不再处理
 _GZIP_STATIC_SUFFIXES = frozenset({".css", ".html", ".js", ".json", ".map", ".mjs", ".svg", ".ttf", ".txt"})
 # 静态文件 gzip 结果缓存：路径 -> (修改时间, 文件大小, 压缩后内容)，文件变化后自动重新压缩
 _gzip_static_cache: Dict[Path, Tuple[int, int, bytes]] = {}
-
-
-def limit_sync_endpoint_concurrency() -> int:
-    """把同步路由端点的并发数限制在 SQLite 连接池容量以内，并返回生效值。
-
-    必须在目标事件循环内调用：anyio 的线程池上限是按事件循环保存的，在循环外设置
-    不会作用到 WebUI 自己的循环上。
-    """
-
-    import anyio.to_thread
-
-    limiter = anyio.to_thread.current_default_thread_limiter()
-    if limiter.total_tokens > MAX_CONCURRENT_SYNC_ENDPOINTS:
-        limiter.total_tokens = MAX_CONCURRENT_SYNC_ENDPOINTS
-    return int(limiter.total_tokens)
 
 
 def _resolve_safe_static_file_path(static_path: Path, full_path: str) -> Path | None:
@@ -179,7 +158,6 @@ def create_app(
     app = FastAPI(title="MaiBot WebUI")
 
     _setup_anti_crawler(app)
-    _setup_cors(app, port)
     app.add_middleware(TextGZipMiddleware)
     _register_api_routes(app)
     _setup_robots_txt(app)
@@ -188,30 +166,6 @@ def create_app(
         _setup_static_files(app)
 
     return app
-
-
-def _setup_cors(app: FastAPI, port: int):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:7999",
-            "http://127.0.0.1:7999",
-            f"http://localhost:{port}",
-            f"http://127.0.0.1:{port}",
-        ],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=[
-            "Content-Type",
-            "Accept",
-            "Origin",
-            "X-Requested-With",
-        ],
-        expose_headers=["Content-Length", "Content-Type"],
-    )
-    logger.debug(t("startup.webui_cors_configured"))
 
 
 def _setup_anti_crawler(app: FastAPI):

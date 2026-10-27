@@ -9,13 +9,15 @@ import uuid
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from src.common.logger import get_logger
+from src.services.internal_chat_profile import get_internal_chat_user_name
 from src.webui.core import get_token_manager
 from src.webui.logs_ws import load_recent_logs
 from src.webui.routers.chat.service import (
+    INTERNAL_CHAT_USER_ID,
     chat_manager,
     dispatch_chat_event,
+    is_virtual_mode_enabled,
     normalize_chat_client_info,
-    normalize_webui_user_id,
     resolve_initial_virtual_identity,
     send_initial_chat_state,
 )
@@ -87,7 +89,7 @@ async def authenticate_websocket_connection(websocket: WebSocket, token: Optiona
     cookie_token = websocket.cookies.get("maibot_session")
     if cookie_token:
         token_manager = get_token_manager()
-        if token_manager.verify_token(cookie_token):
+        if token_manager.verify_cookie_token(cookie_token):
             logger.debug("统一 WebSocket 使用 Cookie 认证成功")
             return True
 
@@ -406,7 +408,8 @@ async def _open_chat_session(connection_id: str, message: Dict[str, Any]) -> Non
         return
 
     data = _get_request_data(message)
-    normalized_user_id = normalize_webui_user_id(cast(Optional[str], data.get("user_id")))
+    # 所有网页聊天室都以主人身份进入同一条内部统一聊天，不再按浏览器区分用户。
+    normalized_user_id = INTERNAL_CHAT_USER_ID
     current_user_name = str(data.get("user_name") or "人类")
     client_info = normalize_chat_client_info(cast(Optional[Dict[str, Any]], data.get("client")))
     current_virtual_config = resolve_initial_virtual_identity(
@@ -415,6 +418,8 @@ async def _open_chat_session(connection_id: str, message: Dict[str, Any]) -> Non
         group_name=cast(Optional[str], data.get("group_name")),
         group_id=cast(Optional[str], data.get("group_id")),
     )
+    if not is_virtual_mode_enabled(current_virtual_config):
+        current_user_name = await asyncio.to_thread(get_internal_chat_user_name, current_user_name)
     restore = bool(data.get("restore"))
     session_id = f"{connection_id}:{client_session_id}"
 

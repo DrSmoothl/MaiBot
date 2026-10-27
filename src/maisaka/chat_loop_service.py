@@ -1306,19 +1306,37 @@ class MaisakaChatLoopService:
         prompt_section: RenderableType | None = None
         prompt_html_uri: str | None = None
 
-        llm_chat = self._get_llm_chat_client(request_kind)
         llm_started_at = time.perf_counter()
-        generation_result = await llm_chat.generate_response_with_context(
-            context_factory=context_factory,
-            options=LLMGenerationOptions(
-                tool_options=all_tools if all_tools else None,
-                response_format=response_format,
-                interrupt_flag=self._interrupt_flag,
-                force_stream_mode=request_kind == "planner" and global_config.chat.reply_timing.planner_message_steering,
-            ),
+        external_planner = (
+            request_kind == "planner"
+            and global_config.agent.planner_enabled
+            and self._session_id in global_config.agent.planner_sessions
         )
+        if external_planner:
+            from src.agent.planner import ACPPlannerSnapshot, generate_planner_response
+
+            external_snapshot = await asyncio.to_thread(ACPPlannerSnapshot(
+                global_config.agent.model_copy(deep=True), list(built_messages),
+                [item.meta.item_id for item in built_messages[1:history_item_count + 1]],
+            ).detached_snapshot)
+            generation_result = await generate_planner_response(
+                external_snapshot.config, self._session_id, built_messages, all_tools,
+                history_item_ids=external_snapshot.history_item_ids,
+            )
+        else:
+            llm_chat = self._get_llm_chat_client(request_kind)
+            generation_result = await llm_chat.generate_response_with_context(
+                context_factory=context_factory,
+                options=LLMGenerationOptions(
+                    tool_options=all_tools if all_tools else None,
+                    response_format=response_format,
+                    interrupt_flag=self._interrupt_flag,
+                    force_stream_mode=request_kind == "planner" and global_config.chat.reply_timing.planner_message_steering,
+                ),
+            )
         if request_kind == "planner":
             self.planner_request_snapshot = (
+                PlannerRequestSnapshot(external_snapshot, tuple(selected_history)) if external_planner else
                 PlannerRequestSnapshot(generation_result.request_snapshot, tuple(selected_history))
                 if generation_result.request_snapshot is not None else None
             )
@@ -1439,7 +1457,6 @@ class MaisakaChatLoopService:
         base_context_size = max(1, int(max_context_size or global_config.chat.max_context_size))
         effective_context_size = max(
             MIN_RETAINED_CHAT_MESSAGES,
-            base_context_size,
             int(base_context_size * CONTEXT_SELECTION_CACHE_STABILITY_RATIO),
         )
         selected_indices: List[int] = []

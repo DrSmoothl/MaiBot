@@ -16,7 +16,12 @@ from src.common.utils.utils_message import MessageUtils
 from src.common.utils.utils_session import SessionUtils
 from src.config.config import global_config
 from src.core.announcement_manager import global_announcement_manager
-from src.core.local_operator import has_command_permission, has_plugin_management_permission, is_local_operator
+from src.core.local_operator import (
+    has_command_permission,
+    has_plugin_management_permission,
+    is_local_operator,
+    is_plugin_relayed,
+)
 from src.platform_io.route_key_factory import RouteKeyFactory
 from src.plugin_runtime.component_query import component_query_service
 from src.plugin_runtime.hook_payloads import deserialize_session_message, serialize_session_message
@@ -264,6 +269,7 @@ class ChatBot:
                 logger.warning(f"Hook {hook_name} 返回的 message 无法反序列化，已忽略: {exc}")
         # Hook 可以修改消息内容，但主程序的接收时刻始终沿用入口记录。
         mutated_message.received_at = received_at
+        mutated_message.file_source = message.file_source
         return hook_result, mutated_message
 
     async def _process_commands(self, message: SessionMessage) -> tuple[bool, Optional[str], bool]:
@@ -307,9 +313,10 @@ class ChatBot:
                         message.platform,
                         message.message_info.additional_config,
                     ),
+                    relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
                 ):
                     self._mark_command_message(message, intercept_message_level=1)
-                    await self._store_intercepted_command_message(message)
+                    # 与其他插件命令共用结果处理入口，在那里统一存储，避免权限拒绝时重复入库。
                     if not global_config.plugin.silent_permission_denied:
                         from src.services.send_service import text_to_stream
 
@@ -446,6 +453,7 @@ class ChatBot:
             global_config.plugin.permission,
             global_config.plugin.command_permissions,
             local_operator=message_is_local_operator,
+            relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
         ):
             self._mark_command_message(message, intercept_message_level=1)
             await self._store_intercepted_command_message(message)
@@ -540,6 +548,7 @@ class ChatBot:
             message.message_info.user_info.user_id,
             global_config.plugin.permission,
             local_operator=message_is_local_operator,
+            relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
         ):
             self._mark_command_message(message, intercept_message_level=1)
             await self._store_intercepted_command_message(message)
@@ -862,6 +871,10 @@ class ChatBot:
                 account_id=account_id,
                 scope=scope,
             )  # 确保会话存在
+
+            from src.files.service import get_file_service
+
+            await get_file_service().ingest(message)
 
             # message.update_chat_stream(chat)
 

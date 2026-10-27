@@ -11,7 +11,7 @@ import uvicorn
 
 from src.common import event_loop_watchdog
 from src.common.utils import port_checker
-from src.webui import webui_server
+from src.common.http_service import server as http_server
 
 WEBUI_PORT = 8001
 # Linux 下的 EADDRINUSE / EADDRNOTAVAIL
@@ -99,7 +99,7 @@ def _install_fake_sockets(
 @pytest.fixture
 def recording_logger(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
     fake_logger = _RecordingLogger()
-    monkeypatch.setattr(webui_server, "logger", fake_logger)
+    monkeypatch.setattr(http_server, "logger", fake_logger)
     return fake_logger
 
 
@@ -115,11 +115,11 @@ def served_sockets(monkeypatch: pytest.MonkeyPatch) -> List[List[Any]]:
         async def serve(self, sockets: Optional[List[Any]] = None) -> None:
             served.append(list(sockets or []))
 
-    fake_app_module = ModuleType("src.webui.app")
+    fake_app_module = ModuleType("src.common.http_service.app")
     fake_app_module.create_app = lambda **kwargs: object()  # type: ignore[attr-defined]
     fake_app_module.show_access_token = lambda: None  # type: ignore[attr-defined]
     fake_app_module.limit_sync_endpoint_concurrency = lambda: 1  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "src.webui.app", fake_app_module)
+    monkeypatch.setitem(sys.modules, "src.common.http_service.app", fake_app_module)
     monkeypatch.setattr(event_loop_watchdog, "start_watchdog", lambda loop_name: None)
     monkeypatch.setattr(uvicorn, "Server", _FakeUvicornServer)
     return served
@@ -184,7 +184,7 @@ async def test_webui_start_skips_host_unavailable_on_this_machine(
     recording_logger: _RecordingLogger,
     served_sockets: List[List[Any]],
 ) -> None:
-    server = webui_server.WebUIServer(hosts=["127.0.0.1", "::1"], port=WEBUI_PORT, register_config_reload=False)
+    server = http_server.HTTPServer(hosts=["127.0.0.1", "::1"], port=WEBUI_PORT, register_config_reload=False)
     _install_fake_sockets(monkeypatch, {"::1": ADDRESS_NOT_AVAILABLE})
 
     await server.start()
@@ -202,10 +202,10 @@ async def test_webui_start_aborts_when_no_host_is_available(
     recording_logger: _RecordingLogger,
     served_sockets: List[List[Any]],
 ) -> None:
-    server = webui_server.WebUIServer(hosts=["::1"], port=WEBUI_PORT, register_config_reload=False)
+    server = http_server.HTTPServer(hosts=["::1"], port=WEBUI_PORT, register_config_reload=False)
     _install_fake_sockets(monkeypatch, {"::1": ADDRESS_NOT_AVAILABLE})
 
-    with pytest.raises(OSError, match="WebUI 无法绑定到任何指定地址"):
+    with pytest.raises(OSError, match="HTTP 无法绑定到任何指定地址"):
         await server.start()
 
     assert served_sockets == []
@@ -218,7 +218,7 @@ async def test_webui_start_still_aborts_on_port_conflict(
     recording_logger: _RecordingLogger,
     served_sockets: List[List[Any]],
 ) -> None:
-    server = webui_server.WebUIServer(hosts=["127.0.0.1", "::1"], port=WEBUI_PORT, register_config_reload=False)
+    server = http_server.HTTPServer(hosts=["127.0.0.1", "::1"], port=WEBUI_PORT, register_config_reload=False)
     _install_fake_sockets(monkeypatch, {"127.0.0.1": ADDRESS_IN_USE})
 
     with pytest.raises(OSError, match=r"端口 8001 已被占用 \(host=127\.0\.0\.1\)"):

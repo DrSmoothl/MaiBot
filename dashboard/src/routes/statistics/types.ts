@@ -19,6 +19,7 @@ export interface DetailedStatisticsSummary {
 
 export interface DetailedStatisticsBreakdown {
   name: string
+  is_embedding: boolean
   request_count: number
   input_tokens: number
   output_tokens: number

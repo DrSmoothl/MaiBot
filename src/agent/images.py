@@ -53,7 +53,7 @@ async def resolve_images(
                 attachments.append(attachment)
             continue
         elif caller == service.agent_id and reference == "screenshot":
-            frame = await service.observe()
+            frame = await service.computer.observe()
             data = await asyncio.to_thread(base64.b64decode, frame["image"], validate=True)
         elif caller == service.agent_id and re.fullmatch(r"[a-f0-9]{64}", reference):
             matches = await asyncio.to_thread(lambda reference=reference: list((workspace / "relay_images").glob(reference + ".*")))

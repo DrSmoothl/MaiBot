@@ -6,7 +6,6 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
-from jsonschema import ValidationError, validate
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 import asyncio
@@ -55,6 +54,7 @@ from src.maisaka.builtin_tool import (
 )
 from .chat_loop_service import ChatResponse
 from .mode_policy import build_consecutive_wait_reminders
+from .reply_supplement import ReplySupplement, generate_reply_supplement
 from .tool_result_condenser import condense_tool_result, should_condense_tool_result
 from src.maisaka.visual.chat_history_refresher import (
     has_pending_image_recognition,
@@ -62,7 +62,7 @@ from src.maisaka.visual.chat_history_refresher import (
     refresh_chat_history_visual_placeholders,
 )
 from src.maisaka.builtin_tool.context import BuiltinToolRuntimeContext
-from src.maisaka.builtin_tool.reply import execute_reply, get_reply_options_spec
+from src.maisaka.builtin_tool.reply import execute_reply
 from src.maisaka.context.messages import (
     ComplexSessionMessage,
     LLMContextMessage,
@@ -158,7 +158,6 @@ class MaisakaReasoningEngine:
         self._runtime = runtime
         self._last_reasoning_content: str = ""
         self._active_logical_turn_id: str | None = None
-        self._reply_options: Dict[str, Any] = {}
         self._turn_passive_replyer: Optional[bool] = None
 
     @property
@@ -239,14 +238,16 @@ class MaisakaReasoningEngine:
             if tool_spec.provider_name == "maisaka_builtin":
                 # 被动式 replyer 用最终正文启动回复；Focus 仍从原始 Provider 获取 reply。
                 if passive_replyer and tool_spec.name == "reply":
-                    visible_builtin_tool_specs.append(get_reply_options_spec(availability_context))
                     continue
                 if passive_replyer and tool_spec.name == "stop":
                     tool_spec = deepcopy(tool_spec)
                     tool_spec.description = "不发送回复，结束本轮思考并等待新消息；无需继续行动时单独调用。"
                 if passive_replyer and tool_spec.name == "show_emoji_list":
                     tool_spec = deepcopy(tool_spec)
-                    tool_spec.description = tool_spec.description.replace("调用 reply 时", "调用 set_reply_options 时")
+                    tool_spec.description = (
+                        "查看表情包选择拼图。图片进入上下文而不发送；决定发言时在最终指导里说明表情意图，"
+                        "由并行回复补充器选择序号和发送位置。"
+                    )
                 if not is_builtin_tool_in_action_stage(tool_spec):
                     continue
                 visibility = get_builtin_tool_visibility(tool_spec)
@@ -356,12 +357,11 @@ class MaisakaReasoningEngine:
         *,
         status_line: str,
     ) -> None:
-        """结束当前思考轮，并清理本轮暂存的回复参数。"""
+        """结束当前思考轮并进入停止等待状态。"""
 
         self._runtime._end_planner_continuation()
         self._runtime._reset_consecutive_wait_count("planner_no_tool_end")
         self._runtime._enter_stop_state()
-        self._reply_options.clear()
         planner_extra_lines.append(status_line)
 
     async def _handle_planner_response_actions(
@@ -444,18 +444,28 @@ class MaisakaReasoningEngine:
         execution_id = uuid.uuid4().hex
         target = state.reply_target_message
         arguments = {
-            **self._reply_options,
             "msg_id": target.message_id if target is not None else "",
             "reply_reference": content,
         }
-        self._reply_options = {}
         self._runtime._update_stage_status("Replyer", "根据 Planner 正文生成可见回复")
         tool_ctx = BuiltinToolRuntimeContext(self, self._runtime)
         if target is None:
             result = tool_ctx.build_failure_result("reply", "Planner 请求快照中没有可回复的真实消息。")
         else:
             try:
-                result = await execute_reply(tool_ctx, arguments, call_id=execution_id, target_message=target)
+                snapshot = self._runtime._chat_loop_service.planner_request_snapshot
+
+                async def supplement_runner() -> ReplySupplement:
+                    if snapshot is None:
+                        raise ValueError("缺少本轮 Planner 请求快照，无法生成回复补充内容")
+                    return await generate_reply_supplement(
+                        snapshot, content, self._runtime.session_id, self._runtime.chat_stream.is_group_session,
+                    )
+
+                result = await execute_reply(
+                    tool_ctx, arguments, call_id=execution_id, target_message=target,
+                    supplement_runner=supplement_runner,
+                )
             except Exception as exc:
                 # 直接执行不再经过 ToolRegistry 的异常边界；记录完整异常并结束，不能重新发送。
                 logger.exception(f"{self._runtime.log_prefix} Planner 正文触发回复异常")
@@ -989,7 +999,6 @@ class MaisakaReasoningEngine:
                             if not state.planner_interrupted:
                                 round_index += 1
                 finally:
-                    self._reply_options.clear()
                     self._turn_passive_replyer = None
                     self._runtime._chat_loop_service.passive_replyer_override = None
                     self._active_logical_turn_id = None
@@ -1798,12 +1807,20 @@ class MaisakaReasoningEngine:
     def _append_tool_result_media_messages(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
         """将 tool result 中的媒体项拆分为紧跟其后的 user context message。"""
 
+        for message in self._build_tool_result_media_messages(tool_call, result):
+            self._schedule_tool_result_media_image_recognition(message.raw_message, message.message_id)
+            self._runtime._chat_history.append(message)
+
+    def _build_tool_result_media_messages(
+        self, tool_call: ToolCall, result: ToolExecutionResult,
+    ) -> List[ToolResultMediaMessage]:
+        """构造关联工具调用的媒体消息，主 Planner 和子 Agent 共用，调用方决定写入哪份历史。"""
+        messages: List[ToolResultMediaMessage] = []
         for item_index, item in self._iter_tool_result_media_items(result):
             media_sequence = self._build_tool_result_media_message_sequence(tool_call, item_index, item)
             visible_text = self._build_tool_result_media_visible_text(tool_call, item_index, item, media_sequence)
             media_index = self._build_tool_result_media_index(tool_call, item_index)
-            self._schedule_tool_result_media_image_recognition(media_sequence, media_index)
-            self._runtime._chat_history.append(
+            messages.append(
                 ToolResultMediaMessage(
                     tool_call_id=tool_call.call_id,
                     session_id=self._runtime.session_id,
@@ -1813,6 +1830,7 @@ class MaisakaReasoningEngine:
                     message_id=media_index,
                 )
             )
+        return messages
 
     def _schedule_tool_result_media_image_recognition(self, media_sequence: MessageSequence, media_index: str) -> None:
         """为 tool result 拆出的图片消息调度后台识图。"""
@@ -2050,9 +2068,6 @@ class MaisakaReasoningEngine:
             for tool_spec in await self._runtime._tool_registry.list_tools(availability_context)
         }
         passive_replyer = self.passive_replyer_enabled
-        reply_options_spec = get_reply_options_spec(availability_context) if passive_replyer else None
-        if reply_options_spec is not None:
-            tool_spec_map[reply_options_spec.name] = reply_options_spec
         total_tool_count = len(tool_calls)
         for tool_index, tool_call in enumerate(tool_calls, start=1):
             self._log_tool_call_source(tool_call, stage=f"Planner {tool_index}/{total_tool_count}")
@@ -2069,20 +2084,6 @@ class MaisakaReasoningEngine:
                     success=False,
                     error_message="被动式 replyer 不调用 reply；决定发言时请直接输出回复指导，不要调用工具。",
                 )
-            elif invocation.tool_name == "set_reply_options" and reply_options_spec is not None:
-                try:
-                    await asyncio.to_thread(validate, invocation.arguments, reply_options_spec.parameters_schema)
-                except ValidationError as exc:
-                    result = ToolExecutionResult(
-                        tool_name=invocation.tool_name, success=False, error_message=f"回复参数无效：{exc.message}"
-                    )
-                else:
-                    self._reply_options = deepcopy(invocation.arguments)
-                    result = ToolExecutionResult(
-                        tool_name=invocation.tool_name,
-                        success=True,
-                        content="已设置本轮下一次发言的参数，尚未发送消息。决定发言时直接输出指导正文。",
-                    )
             else:
                 result = await self._runtime._tool_registry.invoke(invocation, execution_context)
             tool_ended_at = time.time()

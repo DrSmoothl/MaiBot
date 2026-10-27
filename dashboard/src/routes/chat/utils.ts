@@ -3,21 +3,8 @@ import type { ChatTab, SavedVirtualTab } from './types'
 
 const USER_AVATAR_VERSION_STORAGE_KEY = 'maibot_webui_user_avatar_version'
 
-// 生成唯一用户 ID
-export function generateUserId(): string {
-  return 'webui_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now().toString(36)
-}
-
-// 从 localStorage 获取或生成用户 ID
-export function getOrCreateUserId(): string {
-  const storageKey = 'maibot_webui_user_id'
-  let userId = localStorage.getItem(storageKey)
-  if (!userId) {
-    userId = generateUserId()
-    localStorage.setItem(storageKey, userId)
-  }
-  return userId
-}
+// Bot 内部统一聊天中主人的固定用户 ID，与主程序 INTERNAL_CHAT_USER_ID 一致；所有网页聊天室共用这一身份
+export const INTERNAL_CHAT_USER_ID = 'owner'
 
 // 从 localStorage 获取用户昵称
 export function getStoredUserName(): string {

@@ -232,9 +232,15 @@ async def _invoke_send_hook(
         tuple[HookDispatchResult, SessionMessage]: Hook 聚合结果以及可能被改写后的消息对象。
     """
 
+    serialized_message = serialize_session_message(message)
+    if hook_name == "send_service.after_send" and kwargs.get("sent"):
+        from src.common.runtime_loop import run_on_main_loop
+        from src.desktop_pet.service import desktop_pet_service
+
+        await run_on_main_loop(desktop_pet_service.notify_reply(serialized_message))
     hook_result = await _get_runtime_manager().invoke_hook(
         hook_name,
-        message=serialize_session_message(message),
+        message=serialized_message,
         **kwargs,
     )
     mutated_message = message
@@ -668,6 +674,21 @@ async def _prepare_message_for_platform_io(
 
     if set_reply or not message.processed_plain_text:
         message.processed_plain_text = _build_processed_plain_text(message)
+    from src.files.service import disk_call, get_file_service
+
+    # 所有出站驱动共用归属检查，包括 WebUI、本地驱动和转发节点。
+    pending = list(message.raw_message.components)
+    while pending:
+        component = pending.pop()
+        if isinstance(component, ForwardNodeComponent):
+            for node in component.forward_components:
+                pending.extend(node.content)
+        elif isinstance(component, FileComponent) and component.file_ref:
+            file_service = get_file_service()
+            file_service.require_enabled()
+            asset = await disk_call(file_service.store.get, component.file_ref, message.session_id)
+            component.name, component.size, component.mime_type = asset.name, str(asset.size), asset.mime_type
+            component.url, component.base64_data = "", ""
     if typing:
         # 纯图片分段与表情包一样使用固定等待，避免按图片描述长度模拟打字。
         components = message.raw_message.components

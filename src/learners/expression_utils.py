@@ -177,7 +177,11 @@ async def check_expression_suitability(
         return False, f"评估表达方式时发生错误: {e}", str(e)
 
     try:
-        suitable = bool(evaluation.get("suitable", False))
+        if "suitable" not in evaluation:
+            raise ValueError("评估结果缺少 suitable 字段")
+        suitable = evaluation["suitable"]
+        if not isinstance(suitable, bool):
+            raise ValueError("评估结果 suitable 字段必须为 JSON 布尔类型")
         reason = _normalize_reason_text(evaluation.get("reason", "未提供理由"))
         logger.debug(f"评估结果: {'通过' if suitable else '不通过'}")
         return suitable, reason, None

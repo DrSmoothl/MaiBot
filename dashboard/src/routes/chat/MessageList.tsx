@@ -160,7 +160,7 @@ function RuntimeStatusIndicator({
  * 聊天消息列表：支持连续同发送者消息分组、富文本与系统/错误信息样式。
  */
 export function MessageList({
-  messages,
+  messages: incomingMessages,
   isLoadingHistory,
   botDisplayName,
   botQq,
@@ -172,6 +172,12 @@ export function MessageList({
   runtimeStatus,
 }: MessageListProps) {
   const { t } = useTranslation()
+  // 历史数据可能包含同一消息的重复存储记录。按消息身份合并后再进行分组、
+  // 定位和测量，避免不同高度的行共用虚拟列表缓存而持续触发更新。
+  const messages = useMemo(
+    () => Array.from(new Map(incomingMessages.map((message) => [message.id, message])).values()),
+    [incomingMessages]
+  )
   // 当前会话里的图片与表情，按出现顺序排列，供大图预览切换上一张/下一张。
   const galleryImages = useMemo(() => {
     const images = new Map<string, GalleryImage>()
