@@ -12,7 +12,7 @@ from src.chat.replyer.expression_vector_index import ExpressionVectorIndexUpsert
 from src.chat.utils.utils import is_bot_self
 from src.common.data_models.expression_data_model import MaiExpression
 from src.common.data_models.llm_service_data_models import LLMResponseResult
-from src.common.data_models.message_component_data_model import ForwardNodeComponent, MessageSequence, ReplyComponent
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
@@ -27,6 +27,7 @@ from src.services.llm_service import LLMServiceClient
 from .expression_review_store import append_ai_review_log
 from .expression_style_utils import normalize_expression_style_for_learning
 from .expression_utils import check_expression_suitability, parse_expression_response
+from .learning_text import extract_learning_text
 from .pending_learning_buffer import PendingLearningBuffer
 
 if TYPE_CHECKING:
@@ -412,7 +413,7 @@ class ExpressionLearner:
         try:
             learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
             if len(learning_messages) == 2:
-                self.learning_status, self.learning_detail = "no_results", "移除引用和转发后没有可学习的消息"
+                self.learning_status, self.learning_detail = "no_results", "没有可学习的文字正文"
                 return False
             generation_result = await express_learn_model.generate_response_with_context(
                 lambda _client: learning_messages,
@@ -564,18 +565,16 @@ class ExpressionLearner:
 
     @staticmethod
     def _prepare_learning_messages(messages: List["SessionMessage"]) -> List["SessionMessage"]:
-        """为学习创建消息副本，直接移除引用与合并转发组件。"""
+        """为学习创建仅含顶层文字的消息副本，不解析其他组件。"""
 
         learning_messages: List["SessionMessage"] = []
         for message in messages:
+            # 仅白名单文字组件，引用、转发、图片描述和语音转写都不作为学习正文。
+            text = extract_learning_text(message.raw_message)
             # 不改写聊天上下文中的原始组件或完整文本；请求构建与来源过滤共用这些副本。
             learning_message = copy(message)
-            learning_message.raw_message = MessageSequence([
-                component
-                for component in message.raw_message.components
-                if not isinstance(component, (ReplyComponent, ForwardNodeComponent))
-            ])
-            learning_message.processed_plain_text = None
+            learning_message.raw_message = MessageSequence([TextComponent(text)] if text else [])
+            learning_message.processed_plain_text = text
             learning_messages.append(learning_message)
         return learning_messages
 
@@ -584,7 +583,7 @@ class ExpressionLearner:
         messages: List["SessionMessage"],
         system_prompt: str,
     ) -> List[ContextItem]:
-        """构造表达学习使用的多 message 请求。"""
+        """从已准备的纯文字副本构造学习请求，不触发识图或其他消息处理。"""
 
         learning_messages = [
             ContextItemBuilder()
@@ -598,7 +597,6 @@ class ExpressionLearner:
         ]
 
         for index, message in enumerate(messages, start=1):
-            await message.process()
             user_info = message.message_info.user_info
             speaker_name = user_info.user_cardname or user_info.user_nickname or "未知用户"
             speaker_kind = "SELF" if is_bot_self(message.platform, user_info.user_id) else "USER"

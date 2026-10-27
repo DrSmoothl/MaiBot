@@ -88,11 +88,13 @@ export async function getJargonDetail(jargonId: number): Promise<JargonDetailRes
  */
 export async function exportJargons(params: {
   ids?: number[]
+  session_ids?: string[]
   include_chat_info?: boolean
 }): Promise<JargonExportResponse> {
   return backendApi.post<JargonExportResponse>(`${API_BASE}/export`, {
     body: {
       ids: params.ids,
+      session_ids: params.session_ids,
       include_chat_info: params.include_chat_info ?? false,
     },
     errorMessage: '导出黑话失败',

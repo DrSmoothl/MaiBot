@@ -1,19 +1,18 @@
 /**
  * useExpressionImportExport 行为测试：
- * 覆盖导出（未选聊天 / 未选条目 / 成功下载 / 接口失败）、
- * 导入（未选聊天 / 非法 JSON / 空载荷 / 裸数组 / 包装对象 / 接口失败）、
- * 清除（成功回调链 / 失败不触发回调）三条链路。
+ * 覆盖导入（未选聊天 / 非法 JSON / 空载荷 / 裸数组 / 包装对象 / 接口失败）、
+ * 清除（成功回调链 / 失败不触发回调）两条链路。
  */
 import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent } from 'react'
 
-import { clearExpressions, exportExpressions, importExpressions } from '@/lib/expression-api'
+import { clearExpressions, importExpressions } from '@/lib/expression-api'
 
 import { useExpressionImportExport } from '../useExpressionImportExport'
 import type { UseExpressionImportExportOptions } from '../useExpressionImportExport'
 
-import type { ChatInfo, ExpressionExportItem, ExpressionExportResponse } from '@/types/expression'
+import type { ChatInfo, ExpressionExportItem } from '@/types/expression'
 
 const toastMock = vi.hoisted(() => vi.fn())
 
@@ -21,11 +20,10 @@ vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 
 vi.mock('@/lib/expression-api', () => ({
   clearExpressions: vi.fn(),
-  exportExpressions: vi.fn(),
   importExpressions: vi.fn(),
 }))
 
-/** 构造一个具体聊天（名称带非法文件名字符，用于验证文件名清洗） */
+/** 构造一个具体聊天 */
 function makeChat(): ChatInfo {
   return {
     chat_id: 'chat-1',
@@ -51,18 +49,6 @@ function makeExportItem(): ExpressionExportItem {
   }
 }
 
-function makeExportResponse(count: number): ExpressionExportResponse {
-  return {
-    success: true,
-    version: 1,
-    type: 'maibot.expression.export',
-    exported_at: '2026-01-01T00:00:00Z',
-    source_chat_name: 'Chat/1:测试',
-    count,
-    expressions: [makeExportItem()],
-  }
-}
-
 /** 构造 <input type="file"> 的 onChange 事件桩（target.value 可被 hook 清空） */
 function makeFileChangeEvent(file: File | null): {
   event: ChangeEvent<HTMLInputElement>
@@ -78,7 +64,6 @@ function makeFileChangeEvent(file: File | null): {
 function setupHook(overrides: Partial<UseExpressionImportExportOptions> = {}) {
   const options: UseExpressionImportExportOptions = {
     currentChat: makeChat(),
-    selectedIds: new Set([1, 2]),
     onChanged: vi.fn(),
     onClearSelection: vi.fn(),
     onCloseClearConfirm: vi.fn(),
@@ -90,60 +75,6 @@ function setupHook(overrides: Partial<UseExpressionImportExportOptions> = {}) {
 
 beforeEach(() => {
   toastMock.mockClear()
-})
-
-describe('useExpressionImportExport 导出', () => {
-  it('未选择聊天时弹提示且不调用导出接口', async () => {
-    const { result } = setupHook({ currentChat: null })
-
-    await result.current.exportSelectedExpressionsToFile()
-
-    expect(toastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ title: '请选择聊天', variant: 'destructive' })
-    )
-    expect(exportExpressions).not.toHaveBeenCalled()
-  })
-
-  it('没有选中条目时弹提示且不调用导出接口', async () => {
-    const { result } = setupHook({ selectedIds: new Set() })
-
-    await result.current.exportSelectedExpressionsToFile()
-
-    expect(toastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ title: '没有选中项目', variant: 'destructive' })
-    )
-    expect(exportExpressions).not.toHaveBeenCalled()
-  })
-
-  it('导出成功时下载清洗后的文件名并弹成功提示', async () => {
-    vi.mocked(exportExpressions).mockResolvedValue(makeExportResponse(2))
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-    const { result } = setupHook()
-
-    await result.current.exportSelectedExpressionsToFile()
-
-    expect(exportExpressions).toHaveBeenCalledWith({ chat_id: 'chat-1', ids: [1, 2] })
-    expect(clickSpy).toHaveBeenCalledTimes(1)
-    // 通过 mock.contexts 拿到触发下载的 <a> 元素，验证文件名清洗（/ 与 : 均替换为 _）
-    const anchor = clickSpy.mock.contexts[0] as HTMLAnchorElement
-    expect(anchor.download).toBe('expressions-Chat_1_测试-selected.json')
-    expect(toastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ title: '导出成功', description: '已导出 2 个表达方式' })
-    )
-  })
-
-  it('导出接口失败时弹错误提示且不触发下载', async () => {
-    vi.mocked(exportExpressions).mockRejectedValue(new Error('后端炸了'))
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-    const { result } = setupHook()
-
-    await result.current.exportSelectedExpressionsToFile()
-
-    expect(toastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ title: '导出失败', description: '后端炸了', variant: 'destructive' })
-    )
-    expect(clickSpy).not.toHaveBeenCalled()
-  })
 })
 
 describe('useExpressionImportExport 导入', () => {

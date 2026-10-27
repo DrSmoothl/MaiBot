@@ -134,10 +134,11 @@ export async function getExpressionList(params: {
 }
 
 /**
- * 按聊天导出表达方式。导出的 JSON 不包含 session_id。
+ * 按所选记录、聊天范围或全部导出表达方式。导出的 JSON 不包含 session_id。
  */
 export async function exportExpressions(params: {
-  chat_id: string
+  chat_id?: string
+  chat_ids?: string[]
   ids?: number[]
 }): Promise<ExpressionExportResponse> {
   return backendApi.post<ExpressionExportResponse>(`${API_BASE}/export`, {

@@ -313,6 +313,7 @@ class JargonExportRequest(BaseModel):
     """黑话导出请求。"""
 
     ids: Optional[List[int]] = None
+    session_ids: Optional[List[str]] = None
     include_chat_info: bool = False
 
 
@@ -1037,7 +1038,11 @@ def export_jargons(request: JargonExportRequest) -> JargonExportResponse:
 
     try:
         statement = select(Jargon).order_by(col(Jargon.count).desc(), col(Jargon.id).desc())
-        if request.ids:
+        if request.session_ids is not None:
+            scope_filter = build_session_id_dict_filter(request.session_ids)
+            # 显式空范围必须返回空集，不能退化为导出全部。
+            statement = statement.where(scope_filter if scope_filter is not None else col(Jargon.id).in_([]))
+        if request.ids is not None:
             unique_ids = list(dict.fromkeys(request.ids))
             statement = statement.where(col(Jargon.id).in_(unique_ids))
 
