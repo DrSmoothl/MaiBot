@@ -458,12 +458,7 @@ export function ChatPage() {
   }, [])
 
   const handleSessionMessage = useCallback(
-    (
-      tabId: string,
-      tabType: 'webui' | 'virtual',
-      config: VirtualIdentityConfig | undefined,
-      data: WsMessage
-    ) => {
+    (tabId: string, tabType: 'webui' | 'virtual', data: WsMessage) => {
       switch (data.type) {
         case 'session_info':
           if (tabType === 'webui' && data.user_name) {
@@ -699,13 +694,13 @@ export function ChatPage() {
   )
 
   const ensureSessionListener = useCallback(
-    (tabId: string, tabType: 'webui' | 'virtual', config?: VirtualIdentityConfig) => {
+    (tabId: string, tabType: 'webui' | 'virtual') => {
       if (sessionUnsubscribeMapRef.current.has(tabId)) {
         return
       }
 
       const unsubscribe = chatWsClient.onSessionMessage(tabId, (message) => {
-        handleSessionMessage(tabId, tabType, config, message as unknown as WsMessage)
+        handleSessionMessage(tabId, tabType, message as unknown as WsMessage)
       })
       sessionUnsubscribeMapRef.current.set(tabId, unsubscribe)
     },
@@ -714,7 +709,7 @@ export function ChatPage() {
 
   const openSessionForTab = useCallback(
     async (tabId: string, tabType: 'webui' | 'virtual', config?: VirtualIdentityConfig) => {
-      ensureSessionListener(tabId, tabType, config)
+      ensureSessionListener(tabId, tabType)
       setIsLoadingHistory(true)
 
       try {

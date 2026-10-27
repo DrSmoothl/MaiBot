@@ -671,6 +671,7 @@ class AMemorixHostService:
         if not records:
             return
         logger.info(f"A_Memorix 开始回放启动写入队列: pending={len(records)}")
+        failure_counts: Dict[str, int] = {}
         for record in records:
             record_id = str(record.get("record_id", "") or "").strip()
             component_name = str(record.get("component_name", "") or "").strip()
@@ -699,7 +700,20 @@ class AMemorixHostService:
                         "error": str(exc),
                     },
                 )
-                logger.warning(f"A_Memorix 启动队列回放失败: record={record_id}, error={exc}")
+                error = str(exc)
+                failure_counts[error] = failure_counts.get(error, 0) + 1
+
+        if failure_counts:
+            failed_count = sum(failure_counts.values())
+            # 控制汇总长度，完整的逐条错误保留在失败记录文件中。
+            reasons = sorted(failure_counts.items(), key=lambda item: item[1], reverse=True)
+            summary = "；".join(f"{' '.join(error.split())[:120]}（{count} 条）" for error, count in reasons[:3])
+            if len(reasons) > 3:
+                summary += f"；另有 {len(reasons) - 3} 种原因"
+            logger.warning(
+                f"A_Memorix 启动队列回放完成: 成功={len(records) - failed_count}, 失败={failed_count}；"
+                f"原因: {summary}；详细记录: {self._startup_queue_failed_path()}"
+            )
 
     @staticmethod
     def _config_model_to_runtime_dict(config_model: AMemorixConfig) -> Dict[str, Any]:

@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   AlertCircle,
   ArrowUp,
   Loader2,
   MoreHorizontal,
   Package,
+  Plus,
   Trash2,
 } from 'lucide-react'
 
@@ -26,6 +27,7 @@ import { PluginIcon } from '../plugins/PluginIcon'
 import type { PluginListGroup, PluginStatusMeta, PluginUpdateState } from './hooks/usePluginList'
 import { getPluginMarketplaceRoutePath } from './utils'
 import { getPluginLoadFailureInfo } from './load-failure'
+import { AddConnectionDialog } from './AddConnectionDialog'
 
 interface AdapterManagementViewProps {
   groups: PluginListGroup[]
@@ -42,6 +44,7 @@ interface AdapterManagementViewProps {
   onDelete: (plugin: InstalledPlugin) => void
   onFailureDetails: (plugin: InstalledPlugin) => void
   renderIcon?: (plugin: InstalledPlugin) => ReactNode
+  onInstalled: () => void
 }
 
 /** 适配器列表只组织展示，启停与生命周期操作仍由原有领域 hook 统一处理。 */
@@ -60,9 +63,19 @@ export function AdapterManagementView({
   onDelete,
   onFailureDetails,
   renderIcon,
+  onInstalled,
 }: AdapterManagementViewProps) {
+  const [addingConnection, setAddingConnection] = useState(false)
+  const addConnectionButton = (
+    <Button variant="outline" size="sm" onClick={() => setAddingConnection(true)}>
+      <Plus className="h-4 w-4" />
+      添加连接
+    </Button>
+  )
+
   return (
     <div className="space-y-5">
+      {addingConnection && <AddConnectionDialog onClose={() => setAddingConnection(false)} onInstalled={onInstalled} />}
       {defaults}
       {loading ? (
         <div
@@ -73,19 +86,18 @@ export function AdapterManagementView({
           正在加载适配器
         </div>
       ) : groups.length === 0 ? (
-        <SectionPanel title="适配器">
+        <SectionPanel title="适配器" actions={addConnectionButton}>
           <DataPanel className="flex flex-col items-center gap-3 py-10 text-center">
             <Package className="text-muted-foreground h-10 w-10" />
             <p>暂无已安装的适配器</p>
-            <Button asChild variant="outline" size="sm">
-              <a href={getPluginMarketplaceRoutePath()}>前往插件市场安装适配器</a>
-            </Button>
+            <p className="text-muted-foreground text-sm">点击“添加连接”，从插件市场选择适配器下载安装。</p>
           </DataPanel>
         </SectionPanel>
       ) : (
-        groups.map((group) => (
+        groups.map((group, index) => (
           <SectionPanel
             key={group.key}
+            actions={index === 0 ? addConnectionButton : undefined}
             title={
               <span className="flex items-center gap-2">
                 <span>{group.key === 'success' ? '运行中' : group.label}</span>

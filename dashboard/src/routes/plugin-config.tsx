@@ -1785,6 +1785,7 @@ function PluginConfigPageContent() {
 
         {adapterManagement ? (
           <AdapterManagementView
+            onInstalled={() => void loadPlugins()}
             groups={visiblePluginGroups}
             defaults={<AdapterPolicyDefaultsCard />}
             loading={loading}
