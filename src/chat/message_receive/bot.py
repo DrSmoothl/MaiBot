@@ -316,7 +316,7 @@ class ChatBot:
                     relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
                 ):
                     self._mark_command_message(message, intercept_message_level=1)
-                    await self._store_intercepted_command_message(message)
+                    # 与其他插件命令共用结果处理入口，在那里统一存储，避免权限拒绝时重复入库。
                     if not global_config.plugin.silent_permission_denied:
                         from src.services.send_service import text_to_stream
 
