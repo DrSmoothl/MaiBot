@@ -200,6 +200,7 @@ class BuiltinToolRuntimeContext:
                     ProcessedResponseSegment(
                         normalized_text,
                         quote_previous=segment.quote_previous,
+                        is_correction=segment.is_correction,
                     )
                 )
 
