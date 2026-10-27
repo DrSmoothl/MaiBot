@@ -39,7 +39,7 @@ from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
 from src.maisaka.context.clear_context import select_messages_after_latest_clear_marker
 from src.maisaka.context.history import drop_leading_orphan_tool_results
-from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases
+from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases, to_display_message_id
 from src.maisaka.context.messages import (
     ContentContextMessage,
     InternalContextMessage,
@@ -728,6 +728,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         if not self._running:
             raise RuntimeError("不能向已停止的聊天运行实例投递任务")
         task_id = f"{source_kind}:{uuid.uuid4().hex}"
+        if images:
+            # 内部传话没有 IM 消息头，显式给出真实附件的引用，不能让模型用传话 ID 猜工具媒体索引。
+            references = [{"msg_id": to_display_message_id(task_id), "index": index} for index in range(len(images))]
+            text += "\n[图片附件引用] attach_pic=" + json.dumps(references, ensure_ascii=False)
         self._chat_history.append(InternalContextMessage(
             raw_message=MessageSequence([TextComponent(text), *images]), visible_text=text,
             timestamp=datetime.now(), message_id=task_id, source_kind=source_kind,
