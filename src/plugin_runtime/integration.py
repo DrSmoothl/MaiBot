@@ -643,6 +643,12 @@ class PluginRuntimeManager(
             )
             logger.error(f"检测到重复插件 ID，冲突插件将被隔离，其余插件继续加载: {details}")
 
+        # 桌宠已经内置；保留旧插件源码和数据，但不能再启动第二个窗口。
+        known_plugins = await asyncio.to_thread(self._discover_plugin_dependency_map, plugin_dirs)
+        if "sengokucola.desktop-pet" in known_plugins:
+            duplicate_plugin_reasons["sengokucola.desktop-pet"] = (
+                "桌宠已合并到主程序，请在主程序配置中启用 desktop_pet.enabled；旧待办和窗口位置继续沿用。"
+            )
         result = await self._plugin_dependency_pipeline.execute(
             plugin_dirs,
             initial_blocked_plugin_reasons=duplicate_plugin_reasons,

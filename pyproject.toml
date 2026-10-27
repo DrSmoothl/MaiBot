@@ -41,6 +41,7 @@ dependencies = [
     "pyarrow>=20.0.0",
     "pydantic>=2.11.7",
     "pypinyin>=0.54.0",
+    "pywebview>=6.2,<7; sys_platform == 'win32'",
     "prompt-toolkit>=3.0.52",
     "python-multipart>=0.0.31",
     "rapidfuzz",
@@ -70,6 +71,7 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "src.computer" = ["guest.ps1"]
+"src.desktop_pet" = ["web/*.html", "LICENSE"]
 "src.agent" = ["prompts/*/*.txt"]
 "*" = ["_manifest.json", "config_schema.json", "LICENSE", "LICENSE-MAIBOT-GPL.md"]
 

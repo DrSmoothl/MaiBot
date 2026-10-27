@@ -232,9 +232,15 @@ async def _invoke_send_hook(
         tuple[HookDispatchResult, SessionMessage]: Hook 聚合结果以及可能被改写后的消息对象。
     """
 
+    serialized_message = serialize_session_message(message)
+    if hook_name == "send_service.after_send" and kwargs.get("sent"):
+        from src.common.runtime_loop import run_on_main_loop
+        from src.desktop_pet.service import desktop_pet_service
+
+        await run_on_main_loop(desktop_pet_service.notify_reply(serialized_message))
     hook_result = await _get_runtime_manager().invoke_hook(
         hook_name,
-        message=serialize_session_message(message),
+        message=serialized_message,
         **kwargs,
     )
     mutated_message = message

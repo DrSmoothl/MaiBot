@@ -16,6 +16,7 @@ from src.common.http_service.config import HTTPConfig
 from src.common.version import read_project_version
 from src.agent.config import AgentConfig
 from src.computer.config import ComputerConfig
+from src.desktop_pet.config import DesktopPetConfig
 from src.files.config import FilesConfig
 from src.web_search.config import WebConfig, resolve_web_search_config
 
@@ -73,7 +74,7 @@ BOT_CONFIG_PATH: Path = (CONFIG_DIR / "bot_config.toml").resolve().absolute()
 MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute()
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.57"
+CONFIG_VERSION: str = "8.15.58"
 MODEL_CONFIG_VERSION: str = "1.17.25"
 
 logger = get_logger("config")
@@ -104,6 +105,9 @@ class Config(ConfigBase):
 
     computer: ComputerConfig = Field(default_factory=ComputerConfig)
     """共享沙盒电脑配置"""
+
+    desktop_pet: DesktopPetConfig = Field(default_factory=DesktopPetConfig)
+    """内置桌宠配置"""
 
     http: HTTPConfig = Field(default_factory=HTTPConfig)
     """共享后端 HTTP 监听配置"""

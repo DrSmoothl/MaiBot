@@ -204,9 +204,12 @@ class MainSystem:
 
         from src.agent.service import agent_service
         from src.computer.service import computer_service
+        from src.desktop_pet.service import desktop_pet_service
 
         await computer_service.start()
         await agent_service.start()
+
+        await desktop_pet_service.start()
 
         # await asyncio.sleep(0.5) #防止logger输出飞了
 
@@ -301,9 +304,11 @@ async def main() -> None:
         from src.common.shutdown import request_shutdown
         from src.agent.service import agent_service
         from src.computer.service import computer_service
+        from src.desktop_pet.service import desktop_pet_service
 
         request_shutdown("main_finally")
         await stop_ws_broadcasts()
+        await desktop_pet_service.stop()
         if system.app is not None:
             await system.app.stop()
         await heartflow_manager.shutdown()
