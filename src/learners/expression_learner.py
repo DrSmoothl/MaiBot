@@ -698,6 +698,13 @@ class ExpressionLearner:
             # 过滤掉从 bot 自己发言中提取到的表达方式
             if is_bot_self(current_msg.platform, current_msg.message_info.user_info.user_id):
                 continue
+            # 按真实来源消息匹配黑名单，保留其他消息的学习及上下文。
+            if any(
+                user.platform == current_msg.platform
+                and user.user_id == current_msg.message_info.user_info.user_id
+                for user in global_config.expression.learning_blacklist
+            ):
+                continue
             # 过滤掉无上下文的表达方式
             context = (current_msg.processed_plain_text or "").strip()
             if not context:

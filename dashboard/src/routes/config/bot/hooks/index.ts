@@ -24,4 +24,5 @@ export {
   RegexRulesHook,
 } from './complexFieldHooks'
 export { AMemorixRetrievalChatsHook } from './AMemorixRetrievalChatsHook'
+export { LearningBlacklistHook } from './LearningBlacklistHook'
 export { AMemorixRetrievalFilterGroupHook } from './AMemorixRetrievalFilterGroupHook'

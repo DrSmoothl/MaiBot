@@ -3998,6 +3998,13 @@ class LearningItem(ConfigBase):
 ExperimentalConfig.model_rebuild()
 
 
+class LearningBlacklistUser(ConfigBase):
+    """按平台和用户 ID 精确匹配学习来源，不影响正常聊天。"""
+
+    platform: str = Field(min_length=1, pattern=r"^\S+$", json_schema_extra={"label": "平台"})
+    user_id: str = Field(min_length=1, pattern=r"^\S+$", json_schema_extra={"label": "用户 ID"})
+
+
 class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
@@ -4132,6 +4139,12 @@ class ExpressionConfig(ConfigBase):
     )
     """_wrap_让多个群聊或私聊共享学到的表达方式。"""
 
+    learning_blacklist: List[LearningBlacklistUser] = Field(
+        default_factory=list,
+        json_schema_extra={"label": "学习黑名单", "x-widget": "custom"},
+    )
+    """不学习来源指向这些用户消息的表达；按平台和用户 ID 精确匹配，仍保留聊天上下文。"""
+
 
 class JargonConfig(ConfigBase):
     """黑话配置类"""
@@ -4173,6 +4186,12 @@ class JargonConfig(ConfigBase):
         },
     )
     """_wrap_让多个群聊或私聊共享学到的黑话。"""
+
+    learning_blacklist: List[LearningBlacklistUser] = Field(
+        default_factory=list,
+        json_schema_extra={"label": "学习黑名单", "x-widget": "custom"},
+    )
+    """不学习原消息指向这些用户的黑话；按平台和用户 ID 精确匹配，仍保留聊天上下文。"""
 
 
 class VoiceConfig(ConfigBase):

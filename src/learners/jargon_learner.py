@@ -555,6 +555,16 @@ class JargonLearner:
                 skipped_entries.append({"content": content, "source_id": source_id, "reason": "source_id_out_of_range"})
                 continue
 
+            # 在候选和缓存命中汇合处校验真实来源，配置变更也能作用于待处理批次。
+            original_message = messages[line_index].original_message
+            if not _is_learnable_session_message(original_message) or any(
+                user.platform == original_message.platform
+                and user.user_id == original_message.message_info.user_info.user_id
+                for user in global_config.jargon.learning_blacklist
+            ):
+                skipped_entries.append({"content": content, "source_id": source_id, "reason": "excluded_source"})
+                continue
+
             start_idx = max(0, line_index - 3)
             end_idx = min(len(messages), line_index + 4)
             context_items = messages[start_idx:end_idx]
