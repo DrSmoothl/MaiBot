@@ -175,7 +175,7 @@ class HeuristicMemoryInjector:
     ) -> list[MemoryHit]:
         config = global_config.a_memorix.integration
         limit = config.heuristic_memory_recall_limit
-        search_limit = max(limit * 4, limit)
+        search_limit = limit * 4
         cross_chat_enabled = config.heuristic_memory_cross_chat_enabled
         result = await memory_service.search(
             impression,

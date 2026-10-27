@@ -1457,7 +1457,6 @@ class MaisakaChatLoopService:
         base_context_size = max(1, int(max_context_size or global_config.chat.max_context_size))
         effective_context_size = max(
             MIN_RETAINED_CHAT_MESSAGES,
-            base_context_size,
             int(base_context_size * CONTEXT_SELECTION_CACHE_STABILITY_RATIO),
         )
         selected_indices: List[int] = []

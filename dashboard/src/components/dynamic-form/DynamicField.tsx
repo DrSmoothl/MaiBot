@@ -123,7 +123,7 @@ function PrimitiveArrayEditor({
       onFocus={() => {
         isFocusedRef.current = true
       }}
-      rows={Math.max(4, draftRows, arrayValue.length || 4)}
+      rows={Math.max(4, draftRows, arrayValue.length)}
     />
   )
 }

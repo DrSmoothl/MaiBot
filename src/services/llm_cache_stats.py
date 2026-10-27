@@ -259,7 +259,7 @@ def _calculate_theoretical_cache_match(
             best_match_rank = rank
             best_prompt_text = cached_prompt_text
 
-    overlap_rate = best_prefix_length / len(prompt_text) if prompt_text else 0.0
+    overlap_rate = best_prefix_length / len(prompt_text)
     theoretical_hit_tokens = min(prompt_tokens, round(prompt_tokens * overlap_rate))
     theoretical_miss_tokens = max(prompt_tokens - theoretical_hit_tokens, 0)
     return _TheoreticalCacheMatch(
