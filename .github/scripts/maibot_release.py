@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 import argparse
@@ -19,6 +20,8 @@ import tarfile
 import time
 import tomllib
 import zipfile
+
+from release_dependencies import run_with_published_package
 
 
 def digest(path: Path) -> str:
@@ -159,7 +162,23 @@ def smoke(directory: Path) -> None:
     env["UV_TOOL_DIR"] = str(work / "tools")
     env["UV_TOOL_BIN_DIR"] = str(work / "bin")
     wheel = next((directory / "dist").glob("*.whl")).resolve()
-    subprocess.run(["uv", "tool", "install", "--python", "3.13", str(wheel)], cwd=work, env=env, check=True)
+    # 从已校验的 wheel 读取依赖，重试旧产物时也不受当前分支版本变化影响。
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_path = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+        metadata = BytesParser().parsebytes(archive.read(metadata_path))
+    requirements = [Requirement(item) for item in metadata.get_all("Requires-Dist", [])]
+    dashboard = next(item for item in requirements if canonicalize_name(item.name) == "maibot-dashboard")
+    specs = list(dashboard.specifier)
+    if len(specs) != 1 or specs[0].operator != "==" or Version(specs[0].version).is_prerelease:
+        raise ValueError("发布 wheel 必须固定 Dashboard 正式版本")
+    run_with_published_package(
+        ["uv", "tool", "install", "--python", "3.13", str(wheel)],
+        "maibot-dashboard",
+        specs[0].version,
+        cwd=work,
+        env=env,
+        timeout=600,
+    )
     executable = work / "bin" / ("maibot.exe" if os.name == "nt" else "maibot")
     instance = work / "instance"
     for args in (["--help"], ["--version"], ["init", "-d", str(instance)]):
