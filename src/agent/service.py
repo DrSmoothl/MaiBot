@@ -16,7 +16,7 @@ from src.config.config import config_manager, global_config
 
 from src.computer.service import ComputerService, computer_service
 
-from .acp_agent import AcpAgent
+from .acp_agent import AcpAgent, AgentTurnError
 from .config import AgentConfig
 
 logger = get_logger("agent")
@@ -42,6 +42,7 @@ class AgentService:
         self._closing = False
         self.agent_id = "__maibot_agent__"
         self.paused = False
+        self._manual_pause = False
         self.error = ""
         self._task: Optional[asyncio.Task[None]] = None
         self._reload_registered = False
@@ -60,8 +61,14 @@ class AgentService:
         return Path(self.config.acp_cwd).expanduser().absolute() if self.config.acp_cwd else self.root / "workspace"
 
     def policy(self) -> str:
-        path = Path(__file__).parent / "prompts" / "acp" / f"{get_locale()}.txt"
-        return path.read_text(encoding="utf-8")
+        folder = Path(__file__).parent / "prompts" / "acp"
+        locale = get_locale()
+        policy = (folder / f"{locale}.txt").read_text(encoding="utf-8")
+        profile = {"nickname": global_config.bot.nickname, "personality": global_config.personality.personality}
+        policy = policy.replace("{maibot_profile}", json.dumps(profile, ensure_ascii=False))
+        if self.computer.config.enabled:
+            policy += "\n" + (folder / f"{locale}.computer.txt").read_text(encoding="utf-8")
+        return policy
 
     def image_path(self, reference: str) -> Path:
         guest = PureWindowsPath(reference)
@@ -80,7 +87,7 @@ class AgentService:
 
     async def persist(self) -> None:
         async with self._state_lock:
-            state = {"paused": self.paused, "error": self.error}
+            state = {"paused": self.paused, "error": self.error, "manual_pause": self._manual_pause}
             def save() -> None:
                 self.root.mkdir(parents=True, exist_ok=True)
                 write_json(self.root / "runtime.json", state)
@@ -107,9 +114,16 @@ class AgentService:
             if await asyncio.to_thread(state_path.exists):
                 state = await asyncio.to_thread(read_json, state_path)
                 self.paused, self.error = state["paused"], state["error"]
+                # 旧格式只有 paused/error；保留旧故障暂停，收到新请求时才继续。
+                self._manual_pause = state.get("manual_pause", self.paused and not self.error)
             agent = AcpAgent(self)
             await agent.load()
             self.agent, self._settings = agent, settings
+            if self.paused:
+                if self.error:
+                    logger.warning("Agent 恢复了上次的暂停状态：%s；故障暂停可由新请求或 WebUI 恢复，手动暂停须在 WebUI 恢复。", self.error)
+                else:
+                    logger.warning("Agent 保持上次的手动暂停状态；需要继续处理排队任务时，请在 WebUI 恢复。")
             self._task = asyncio.create_task(self._run(), name="agent")
 
     async def stop(self) -> None:
@@ -139,12 +153,19 @@ class AgentService:
             raise PermissionError("跨聊天读取由独立 Agent 执行；普通聊天请使用 agent_talk。")
 
     async def context(self) -> str:
-        """电脑专用环境上下文，每轮替换注入，不重复追加固定说明到聊天历史。"""
-        frame = self.computer.bridge.last_frame
-        observation = {key: value for key, value in frame.items() if key != "image"} if frame else None
-        state, activity = self.status(), dict(self.computer.activity)
-        return json.dumps({"state": state, "last_activity": activity, "last_observation": observation,
-                           "workspace": str(self.workspace)}, ensure_ascii=False)
+        """仅提供任务所需的目录信息；能力由接入说明声明，运行状态通过工具按需查询。"""
+        def render() -> str:
+            path = Path(__file__).parent / "prompts" / "acp" / f"{get_locale()}.environment.txt"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            # 本机连接只显示一次目录；远程连接必须保留麦麦侧附图路径的边界。
+            if not self.config.acp_remote_cwd:
+                lines = [line for line in lines if "{maibot_workspace}" not in line]
+            return "\n".join(lines).format(
+                workspace=self.config.acp_remote_cwd or str(self.workspace),
+                maibot_workspace=str(self.workspace),
+            ) + "\n\n"
+
+        return await asyncio.to_thread(render)
 
     async def _run(self) -> None:
         while True:
@@ -162,6 +183,7 @@ class AgentService:
                 self._turn_task = asyncio.create_task(agent.run_turn(), name="agent.turn")
                 try:
                     await self._turn_task
+                    self.error = ""
                 except asyncio.CancelledError:
                     if asyncio.current_task().cancelling():
                         raise
@@ -172,10 +194,28 @@ class AgentService:
                 await self.persist()
             except asyncio.CancelledError:
                 raise
+            except AgentTurnError as exc:
+                self.error = str(exc)
+                logger.exception("Agent 本轮执行失败，等待后续请求，不重发原任务")
+                await self.persist()
+                from .messaging import report_failure
+
+                for target, task_ids in exc.reply_targets.items():
+                    try:
+                        await report_failure(self, target, task_ids, self.error)
+                    except Exception:
+                        # 通知失败必须可诊断，但不能覆盖原始执行错误或阻止其他来源收到通知。
+                        logger.exception("Agent 失败通知未送达：target=%s tasks=%s", target, task_ids)
             except Exception as exc:
                 self.error, self.paused = str(exc), True
                 logger.exception("Agent 执行失败，已暂停")
                 await self.persist()
+
+    async def resume_after_error(self) -> None:
+        """新用户输入可重新尝试故障连接，系统输入不能解除暂停。"""
+        if self.paused and self.error and not self._manual_pause:
+            self.paused = False
+            await self.persist()
 
     async def control(self, operation: str) -> Dict[str, Any]:
         self.require_agent()
@@ -183,9 +223,11 @@ class AgentService:
             raise ValueError("Agent control 只接受 pause/resume，电脑控制请使用独立电脑接口。")
         if operation == "pause":
             self.paused = True
+            self._manual_pause = True
             await _cancel_task(self._turn_task)
         else:
             self.paused, self.error = False, ""
+            self._manual_pause = False
         self._wake.set()
         await self.persist()
         return self.status()

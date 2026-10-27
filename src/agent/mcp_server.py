@@ -22,7 +22,9 @@ from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, Tool
 
 
 class ToolMCPServer:
-    def __init__(self, providers: Sequence[ToolProvider], session_id: str, timeout: float) -> None:
+    def __init__(
+        self, providers: Sequence[ToolProvider], session_id: str, timeout: float, *, port: int = 0,
+    ) -> None:
         self.registry = ToolRegistry()
         for provider in providers:
             self.registry.register_provider(provider)
@@ -30,6 +32,8 @@ class ToolMCPServer:
         self.timeout = timeout
         self.token = secrets.token_urlsafe(32)
         self.url = ""
+        self.port: Optional[int] = None
+        self._bind_port = port
         self.server: Optional[uvicorn.Server] = None
         self.task: Optional[asyncio.Task[None]] = None
 
@@ -53,8 +57,13 @@ class ToolMCPServer:
             return types.CallToolResult(content=content, isError=not result.success)
 
         sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
+        try:
+            sock.bind(("127.0.0.1", self._bind_port))
+        except BaseException:
+            sock.close()
+            raise
         port = sock.getsockname()[1]
+        self.port = port
         self.url = f"http://127.0.0.1:{port}/mcp"
         manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True, security_settings=TransportSecuritySettings(
             enable_dns_rebinding_protection=True, allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[],

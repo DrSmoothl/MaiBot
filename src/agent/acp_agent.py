@@ -9,27 +9,38 @@ from uuid import uuid4
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 
 from src.common.async_work import run_sync_work
 from src.common.data_models.message_component_data_model import ImageComponent
 from src.common.json_storage import read_json, write_json
-from src.config.config import global_config
 from src.computer.provider import ComputerToolProvider
 from src.files.provider import FileToolProvider
 
 from src.llm_models.payload_content.context_item import (
     AssistantMessageItem, ContextImagePart, ContextItem, ContextItemBuilder, ContextItemMeta, ContextTextPart,
-    ProviderActivityItem, ReasoningItem, ReasoningRepresentation, RoleType, get_item_text,
+    ProviderActivityItem, ReasoningItem, ReasoningRepresentation, RoleType,
 )
 
-from .acp import ACPConnection, desktop_manifest
+from .acp import ACPConnection, ACPRequestError, desktop_manifest, session_cwd
 from .history import AgentHistory
 from .mcp_server import ToolMCPServer
 
 if TYPE_CHECKING:
     from .service import AgentService
+
+
+class AgentTurnError(RuntimeError):
+    """已结束的单轮失败，保留原始错误及可信传话来源用于回报。"""
+
+    def __init__(self, message: str, batch: Sequence[Dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.reply_targets: Dict[str, List[str]] = {}
+        for record in batch:
+            if record.get("reply_to"):
+                self.reply_targets.setdefault(record["reply_to"], []).append(record["id"])
 
 
 class AcpAgent:
@@ -67,7 +78,10 @@ class AcpAgent:
             state = {"inbox": deepcopy(self.inbox), "backends": deepcopy(self._backends)}
             await run_sync_work(write_json, self.history.root / "state.json", state)
 
-    async def enqueue(self, text: str, images: Sequence[ImageComponent] = (), *, kind: Literal["user", "system"] = "user") -> str:
+    async def enqueue(
+        self, text: str, images: Sequence[ImageComponent] = (), *,
+        kind: Literal["user", "system"] = "user", reply_to: str = "",
+    ) -> str:
         builder = ContextItemBuilder().add_text_content(text)
         for image in images:
             # 接口中的图片已校验、存入工作区；上下文直接带实际图像。
@@ -80,20 +94,18 @@ class AcpAgent:
             fmt = await asyncio.to_thread(image_format, image.binary_data)
             builder.add_image_content(fmt, base64.b64encode(image.binary_data).decode())
         record = await self.record(kind, [builder.build()])
+        if reply_to:
+            record["reply_to"] = reply_to
         self.inbox.append(record)
         await self.save()
+        if kind == "user":
+            await self.service.resume_after_error()
         self.service._wake.set()
         return record["id"]
 
     async def record(self, kind: str, items: Sequence[ContextItem]) -> Dict[str, Any]:
         return {"id": uuid4().hex, "time": datetime.now().astimezone().isoformat(), "kind": kind,
                 "items": await asyncio.to_thread(self.history.pack, items)}
-
-    def system_prompt(self) -> ContextItem:
-        policy = self.service.policy()
-        text = "\n\n".join([global_config.bot.nickname, global_config.personality.personality,
-                                policy])
-        return ContextItemBuilder().set_role(RoleType.System).add_text_content(text).build()
 
     @property
     def desktop_manifest(self) -> Path:
@@ -111,26 +123,27 @@ class AcpAgent:
                 return
             await self.close()
         cwd = await asyncio.to_thread(Path(self.config.acp_cwd).expanduser().resolve) if self.config.acp_cwd else self.history.root / "workspace"
+        remote_cwd = session_cwd(self.config, cwd)
         await asyncio.to_thread(cwd.mkdir, parents=True, exist_ok=True)
-        if self.backend_state.get("cwd", str(cwd)) != str(cwd):
+        if self.backend_state.get("cwd", remote_cwd) != remote_cwd:
             raise ValueError("ACP 会话的主机工作目录已改变，请恢复原工作目录再连接。")
         from .provider import AgentToolProvider
 
         self.mcp = ToolMCPServer(
             [AgentToolProvider(self.service), ComputerToolProvider(self.service.computer, visible=True), FileToolProvider()],
-            self.service.agent_id, self.config.acp_timeout,
+            self.service.agent_id, self.config.acp_timeout, port=self.config.mcp_port,
         )
         self.connection = ACPConnection(self._update)
         try:
             mount = await self.mcp.start()
-            self.capabilities = await self.connection.initialize(self.config, cwd, "maibot-agent")
+            self.capabilities = await self.connection.initialize(self.config, cwd, "maibot-agent", mcp_port=self.mcp.port)
             session_id = self.backend_state.get("session_id")
             if session_id and "resume" not in self.capabilities.get("sessionCapabilities", {}):
                 raise ValueError("外部 Agent 未声明 session/resume 能力，不能恢复已记录的会话")
-            session = await self.connection.open_session(cwd, mount, session_id, self.config.acp_timeout)
+            session = await self.connection.open_session(remote_cwd, mount, session_id, self.config.acp_timeout)
             self._connected_session_id = session_id if session_id else session["sessionId"]
             if not session_id:
-                self.backend_state.update(session_id=self._connected_session_id, cwd=str(cwd))
+                self.backend_state.update(session_id=self._connected_session_id, cwd=remote_cwd)
                 await self.save()
             await self.connection.select_model(self.config, session, self._connected_session_id)
         except BaseException:
@@ -201,8 +214,12 @@ class AcpAgent:
                 return
             items = await asyncio.to_thread(self.history.unpack, [item for record in batch for item in record["items"]])
             prompt = []
-            if not self.backend_state.get("policy_sent", False):
-                prompt.append({"type": "text", "text": get_item_text(await asyncio.to_thread(self.system_prompt))})
+            # ACP prompt 传递接入说明，不冒充外部 harness 的系统消息。
+            # 按内容同步，旧会话及能力/人格资料变更后也能收到最新说明。
+            policy = await asyncio.to_thread(self.service.policy)
+            policy_key = hashlib.sha256(policy.encode()).hexdigest()
+            if self.backend_state.get("policy") != policy_key:
+                prompt.append({"type": "text", "text": policy})
             prompt.append({"type": "text", "text": await self.service.context()})
             for item in items:
                 for part in item.parts:
@@ -224,9 +241,15 @@ class AcpAgent:
             }), name="agent.acp.prompt")
             try:
                 result = await asyncio.shield(task)
+            except ACPRequestError as exc:
+                # 对端已明确结束此请求；保留部分输出，不把失败回合当作在途任务重放。
+                self.backend_state["stop_reason"] = "error"
+                self.pending = None
+                await self.save()
+                raise AgentTurnError(str(exc), batch) from exc
             except asyncio.CancelledError:
                 await self._cancel_prompt(task)
-                self.backend_state.update(policy_sent=True, stop_reason="cancelled")
+                self.backend_state.update(policy=policy_key, stop_reason="cancelled")
                 self.pending = None
                 await self.save()
                 raise
@@ -234,10 +257,13 @@ class AcpAgent:
                 if not task.done():
                     task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-            self.backend_state["policy_sent"] = True
+            self.backend_state["policy"] = policy_key
             self.backend_state["stop_reason"] = result["stopReason"]
             self.pending = None
             await self.save()
+            if result["stopReason"] != "end_turn":
+                # 已收到最终回执，保留输出并清除在途标记；报告单轮失败，不重发原任务。
+                raise AgentTurnError(f"外接 Agent 未正常完成：{result['stopReason']}，已有输出已保留，原任务不会自动重发", batch)
         finally:
             self.state = "idle"
 

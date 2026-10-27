@@ -24,7 +24,7 @@ from src.llm_models.payload_content.context_item import ContextItem, SystemMessa
 from src.llm_models.payload_content.tool_option import ToolCall, ToolDefinitionInput
 from src.plugin_runtime.hook_payloads import serialize_prompt_items, serialize_tool_definitions
 
-from .acp import ACPConnection, desktop_manifest
+from .acp import ACPConnection, desktop_manifest, session_cwd
 from .config import AgentConfig
 from .mcp_server import ToolMCPServer
 from .planner_state import PlannerState, content_keys, select_delta
@@ -132,15 +132,18 @@ async def _generate_planner_response(
             (text if kind == "agent_message_chunk" else thoughts).append(event["content"]["text"])
 
     connection = ACPConnection(update)
-    mcp = ToolMCPServer([decisions], session_id, config.acp_timeout)
+    mcp = ToolMCPServer([decisions], session_id, config.acp_timeout, port=config.mcp_port)
     cwd = Path(config.acp_cwd).expanduser() if config.acp_cwd else get_instance_root() / "data/agent/workspace"
     cwd = await asyncio.to_thread(cwd.resolve)
+    remote_cwd = session_cwd(config, cwd)
     await asyncio.to_thread(cwd.mkdir, parents=True, exist_ok=True)
     policy = await asyncio.to_thread(
         (Path(__file__).parent / "prompts/planner" / f"{get_locale()}.txt").read_text, encoding="utf-8",
     )
     manifest = desktop_manifest(config)
     identity = {"connection": config.connection, "cwd": str(cwd)}
+    if config.acp_remote_cwd:
+        identity["remote_cwd"] = remote_cwd
     if config.connection == "dsh_desktop":
         identity["manifest"] = str(manifest.absolute())
     else:
@@ -163,11 +166,11 @@ async def _generate_planner_response(
         cleanup.push_async_callback(mcp.close)
         cleanup.push_async_callback(connection.close, 1)
         mount = await mcp.start()
-        capabilities = await connection.initialize(config, cwd, "maibot-planner")
+        capabilities = await connection.initialize(config, cwd, "maibot-planner", mcp_port=mcp.port)
         if "resume" not in capabilities.get("sessionCapabilities", {}):
             raise ValueError("外接 Planner 需要 session/resume 能力以恢复持久会话")
         session_id = state.data.get("session_id")
-        session = await connection.open_session(cwd, mount, session_id, config.acp_timeout)
+        session = await connection.open_session(remote_cwd, mount, session_id, config.acp_timeout)
         external_session = session_id if session_id else session["sessionId"]
         if not session_id:
             state.data.update(session_id=external_session, identity=identity)

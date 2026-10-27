@@ -41,10 +41,20 @@ class AgentConfig(ConfigBase):
     acp_args: List[str] = Field(default_factory=list, json_schema_extra={
         "label": {"zh_CN": "自定义启动参数"}, "advanced": True,
     })
-    """仅自定义 ACP 使用，逐项填写参数；dsh 预设忽略此项并自动生成 --profile acp。"""
+    """仅自定义 ACP 使用，逐项填写参数；{mcp_port} 替换为本次工具服务端口，可用于 SSH -R 反向转发。dsh 预设忽略此项并自动生成 --profile acp。"""
 
     acp_cwd: str = Field(default="", json_schema_extra={"label": {"zh_CN": "ACP 主机工作目录"}})
-    """外部进程的主机工作目录，留空使用 data/agent/workspace；不是沙盒 C:\\MaiWorkspace。同一会话恢复时保持不变。"""
+    """麦麦所在主机上启动 ACP 程序（或 ssh）的工作目录，留空使用 data/agent/workspace；不是沙盒 C:\\MaiWorkspace。同一会话恢复时保持不变。"""
+
+    acp_remote_cwd: str = Field(default="", json_schema_extra={
+        "label": {"zh_CN": "ACP 远程会话工作目录"}, "advanced": True,
+    })
+    """远程自定义 ACP 或经 SSH 隧道连接 Desktop 时填写远端已存在的绝对路径，原样传给外部会话，不在本机创建或展开。留空使用本机工作目录；远程工具回连需配置 SSH 反向转发，详见 docs/agent-connections.md。"""
+
+    mcp_port: int = Field(default=0, ge=0, le=65535, json_schema_extra={
+        "label": {"zh_CN": "Agent 工具回连端口"}, "advanced": True,
+    })
+    """默认 0 自动分配本机回环端口；Desktop SSH 隧道可设固定端口并自行反向转发。同一端口只能用于一个连接；多聊天外接 Planner 应保留 0 并使用 {mcp_port}。"""
 
     acp_env: Dict[str, str] = Field(default_factory=dict, json_schema_extra={"label": {"zh_CN": "ACP 环境变量"}, "advanced": True})
     """追加或覆盖外部进程环境变量，例如 DSH_HOME；模型凭据建议保存在 dsh 自身配置中。"""
