@@ -13,6 +13,7 @@ from src.chat.replyer.expression_vector_index import expression_vector_index
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
+from src.common.prompt_i18n import load_prompt
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
 from src.config.config import global_config, model_config
 from src.learners.expression_style_utils import (
@@ -270,14 +271,10 @@ class MaisakaExpressionSelector:
             for candidate in candidates
         ]
 
-        return (
-            "你是 Maisaka 的表达方式选择子代理。\n"
-            "你只负责根据下方真实聊天上下文，为这一次可见回复挑选最合适的表达方式。\n"
-            f"请只从下面候选中选择 0 到 {MAX_SELECTED_EXPRESSIONS} 条最适合当前语境的表达方式。\n"
-            "优先考虑自然、贴合上下文、不生硬、不模板化。\n"
-            "如果没有明显合适的，就返回空数组。\n"
-            '严格只输出 JSON，对象格式为 {"selected_ids":[123,456]}。\n\n'
-            f"候选表达方式：\n{chr(10).join(candidate_lines)}"
+        return load_prompt(
+            "maisaka_expression_selector",
+            max_selected=MAX_SELECTED_EXPRESSIONS,
+            candidates="\n".join(candidate_lines),
         )
 
     def _parse_selected_ids(self, raw_response: str, candidates: List[dict[str, Any]]) -> List[int]:
