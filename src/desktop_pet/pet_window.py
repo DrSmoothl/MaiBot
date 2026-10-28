@@ -7,7 +7,7 @@
 
 from ctypes import wintypes
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TextIO, Tuple
 
 import argparse
 import ctypes
@@ -16,13 +16,14 @@ import json
 import os
 import sys
 import threading
-import time
-import uuid
 import webview
+
+if TYPE_CHECKING:
+    from .todos import TodoStore
 
 # 页面设计尺寸（CSS 像素），与 index.html 布局一致。
 PAGE_WIDTH = 260
-PAGE_HEIGHT = 320
+PAGE_HEIGHT = 460
 PAGE = Path(__file__).parent / "web" / "index.html"
 
 # 页面就绪前先放行桌宠所在的大致区域，与 index.html 中 #pet 的位置一致。
@@ -189,43 +190,15 @@ class Outbox:
             self._stream.flush()
 
 
-class TodoStore:
-    """待办列表，完成即删除。"""
-
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._lock = threading.Lock()
-        self._items: List[Dict[str, Any]] = json.loads(path.read_text("utf-8")) if path.exists() else []
-
-    def list(self) -> List[Dict[str, Any]]:
-        with self._lock:
-            return list(self._items)
-
-    def add(self, text: str) -> Dict[str, Any]:
-        item = {"id": uuid.uuid4().hex, "text": text, "created_at": time.time()}
-        with self._lock:
-            self._items.append(item)
-            self._save()
-        return item
-
-    def done(self, todo_id: str) -> None:
-        with self._lock:
-            self._items = [item for item in self._items if item["id"] != todo_id]
-            self._save()
-
-    def _save(self) -> None:
-        temp_path = self._path.with_suffix(".tmp")
-        temp_path.write_text(json.dumps(self._items, ensure_ascii=False, indent=2), "utf-8")
-        temp_path.replace(self._path)
-
-
 class PetApi:
     """暴露给页面的 js_api；下划线开头的成员不会暴露。"""
 
-    def __init__(self, outbox: Outbox, todos: TodoStore, state_path: Path) -> None:
+    def __init__(self, outbox: Outbox, todos: "TodoStore", state_path: Path, request_dir: Path) -> None:
         self._outbox = outbox
         self._todos = todos
         self._state_path = state_path
+        self._request_dir = request_dir
+        request_dir.mkdir(parents=True, exist_ok=True)
         self._window: Optional[webview.Window] = None
         self._hwnd = 0
         self._size = (0, 0)
@@ -287,8 +260,18 @@ class PetApi:
     def ready(self) -> None:
         self._outbox.emit({"type": "ready"})
 
-    def send(self, text: str) -> None:
-        self._outbox.emit({"type": "chat", "text": text})
+    def send(self, request_id: str, text: str, images: List[Dict[str, str]]) -> None:
+        from attachments import MAX_REQUEST_BYTES
+        import re
+
+        if not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise ValueError("无效请求 ID")
+        payload = json.dumps({"text": text, "images": images}).encode("utf-8")
+        if len(payload) > MAX_REQUEST_BYTES:
+            raise ValueError("图文消息过大")
+        path = self._request_dir / f"{request_id}.json"
+        path.write_bytes(payload)
+        self._outbox.emit({"type": "chat", "request_id": request_id})
 
     def todos(self) -> List[Dict[str, Any]]:
         return self._todos.list()
@@ -331,9 +314,51 @@ def pump_commands(api: PetApi, window: webview.Window, commands: TextIO) -> None
             try:
                 if command["type"] == "show":
                     window.show()
+                    window.evaluate_js("window.petSkin.visibility(true)")
                 elif command["type"] == "hide":
                     window.hide()
-                elif command["type"] in {"reply", "notice", "thinking", "idle", "failed"}:
+                    window.evaluate_js("window.petSkin.visibility(false)")
+                elif command["type"] == "skin":
+                    completed = threading.Event()
+                    results = []
+                    def loaded(result, results=results, completed=completed):
+                        results.append(result)
+                        completed.set()
+                    window.evaluate_js(
+                        f"window.petSkin.install({json.dumps(command['skin'])}).catch(e => ({{error: String(e.message || e)}}))",
+                        callback=loaded,
+                    )
+                    if not completed.wait(10):
+                        window.evaluate_js("window.petSkin.cancelInstall()")
+                        raise TimeoutError("皮肤资源解码超时")
+                    if results[0].get("error"):
+                        raise ValueError(results[0]["error"])
+                    ack["result"] = results[0]
+                elif command["type"] == "animation":
+                    ack["result"] = window.evaluate_js(
+                        f"window.petSkin.command({json.dumps(command['action'])}, {json.dumps(command['args'])}, {json.dumps(command['owner'])})"
+                    )
+                elif command["type"] == "todo":
+                    action = command["action"]
+                    if action == "list":
+                        result = {"items": api._todos.list()}
+                    elif action == "add":
+                        result = {"item": api._todos.add(command["text"])}
+                    elif action == "update":
+                        result = {"item": api._todos.update(command["todo_id"], command["text"])}
+                    elif action == "delete":
+                        api._todos.done(command["todo_id"])
+                        result = {"deleted": command["todo_id"]}
+                    else:
+                        raise ValueError("未知待办操作")
+                    ack["result"] = result
+                    if action != "list":
+                        try:
+                            window.evaluate_js("window.pet.refreshTodos()")
+                        except Exception as exc:
+                            # 数据已保存；界面刷新失败不能误报为写入失败并诱发重复新增。
+                            result["display_error"] = str(exc)
+                elif command["type"] in {"reply", "notice", "thinking", "idle", "failed", "accepted"}:
                     window.evaluate_js(f"window.pet.receive({json.dumps(command)})")
                 else:
                     raise ValueError(f"未知的桌宠指令: {command['type']}")
@@ -352,13 +377,15 @@ def main() -> None:
     parser.add_argument("--runtime-dir", type=Path, required=True)
     args = parser.parse_args()
 
+    from todos import TodoStore
+
     _bind_win32()
     # 显式声明 DPI 感知，窗口位置、光标与窗口区域统一使用物理像素。
     user32.SetProcessDPIAware()
     outbox = Outbox()
     args.data_dir.mkdir(parents=True, exist_ok=True)
     args.runtime_dir.mkdir(parents=True, exist_ok=True)
-    api = PetApi(outbox, TodoStore(args.data_dir / "todos.json"), args.data_dir / "window.json")
+    api = PetApi(outbox, TodoStore(args.data_dir / "todos.json"), args.data_dir / "window.json", args.runtime_dir / "requests")
     window = webview.create_window(
         "MaiBot Desktop Pet",
         url=PAGE.as_uri(),

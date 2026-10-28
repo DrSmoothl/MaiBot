@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { parse as parseToml } from 'smol-toml'
 
+import { DesktopPetSkinField } from '@/components/DesktopPetSkinField'
 import { AgentACPField, AgentConnectionSettings, AgentCustomArgs, AgentDesktopField } from '@/components/agent/AgentConnectionSettings'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -343,6 +344,7 @@ function BotConfigPageContent() {
 
   useEffect(() => {
     const hookEntries = [
+      ['desktop_pet.skin_id', DesktopPetSkinField],
       ['agent.connection', AgentConnectionSettings, 'wrapper'],
       ['agent.desktop_manifest', AgentDesktopField, 'wrapper'],
       ['agent.acp_args', AgentCustomArgs, 'wrapper'],

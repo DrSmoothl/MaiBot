@@ -147,3 +147,17 @@ async def test_web_rename_reaches_other_windows_and_pet_without_changing_virtual
     # 旧标签页发送携带过期昵称时不能改回共享昵称。
     await chat_service.handle_chat_message("1", {"content": "网页发言", "user_name": "过期昵称"}, "旧名字", "owner", None)
     assert process.await_args.args[0]["message_info"]["user_info"]["user_nickname"] == "统一称呼"
+
+
+@pytest.mark.asyncio
+async def test_desktop_image_and_text_share_message(monkeypatch):
+    process, broadcast = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(chat_bot, "message_process", process)
+    monkeypatch.setattr(chat_service.chat_manager, "broadcast_to_group", broadcast)
+    images = [{"base64": "aW1hZ2U=", "mime_type": "image/png", "name": "clipboard.png"}]
+    await chat_service.relay_plugin_chat_message("builtin.desktop_pet", "看这张", images=images)
+    data = process.await_args.args[0]
+    assert data["message_segment"]["data"] == [
+        {"type": "text", "data": "看这张"}, {"type": "image", "data": "aW1hZ2U="},
+    ]
+    assert broadcast.await_args.args[1]["images"] == images

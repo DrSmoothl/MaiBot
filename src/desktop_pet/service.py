@@ -31,11 +31,12 @@ class DesktopPetService:
         self._ready = False
         self._visible = False
         self._error = ""
+        self._skin_id = "builtin"
         self._closing = True
         self._reload_registered = False
         self._lifecycle_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
-        self._pending: Dict[str, asyncio.Future[None]] = {}
+        self._pending: Dict[str, asyncio.Future[Any]] = {}
         self._notifications: Set[asyncio.Task[None]] = set()
 
     def status(self) -> Dict[str, Any]:
@@ -46,6 +47,7 @@ class DesktopPetService:
             "ready": self._ready and not self._closing,
             "visible": self._visible,
             "error": self._error,
+            "skin_id": self._skin_id,
         }
 
     async def start(self) -> None:
@@ -59,6 +61,10 @@ class DesktopPetService:
 
     async def _reload(self) -> None:
         async with self._lifecycle_lock:
+            if self._ready and global_config.desktop_pet.enabled:
+                if self._skin_id != global_config.desktop_pet.skin_id:
+                    await self.apply_skin(global_config.desktop_pet.skin_id)
+                return
             await self._stop()
             self._error = ""
             if not global_config.desktop_pet.enabled:
@@ -153,15 +159,16 @@ class DesktopPetService:
         if kind == "ready":
             self._ready = self._visible = True
             logger.info("内置桌宠已出现在桌面上")
+            self._observe(self.apply_skin(global_config.desktop_pet.skin_id))
         elif kind == "chat":
-            self._observe(self._chat(event["text"]))
+            self._observe(self._chat(event["request_id"]))
         elif kind == "ack":
             future = self._pending.get(event["id"])
             if future is not None and not future.done():
                 if event.get("error"):
                     future.set_exception(RuntimeError(event["error"]))
                 else:
-                    future.set_result(None)
+                    future.set_result(event.get("result"))
         else:
             raise ValueError(f"未知的桌宠事件: {kind}")
 
@@ -177,28 +184,32 @@ class DesktopPetService:
         self._notifications.add(task)
         task.add_done_callback(finished)
 
-    async def _chat(self, text: str) -> None:
-        from src.plugin_runtime.capabilities.internal_chat import SendRequest
+    async def _chat(self, request_id: str) -> None:
         from src.webui.routers.chat.service import relay_plugin_chat_message
+        from .attachments import read_request
 
         try:
-            request = SendRequest.model_validate({"text": text})
-            await relay_plugin_chat_message("builtin.desktop_pet", request.text)
-        except Exception:
+            request = await asyncio.to_thread(
+                read_request, get_instance_root() / "temp" / "desktop_pet" / "requests", request_id,
+            )
+            await relay_plugin_chat_message("builtin.desktop_pet", request["text"], images=request["images"])
+        except Exception as exc:
             # 单条消息投递失败只影响这一句，桌宠窗口继续运行。
-            await self._command({"type": "failed"})
+            await self._command({"type": "failed", "request_id": request_id, "error": str(exc)})
             raise
+        else:
+            await self._command({"type": "accepted", "request_id": request_id})
 
-    async def _command(self, command: Dict[str, Any]) -> None:
+    async def _command(self, command: Dict[str, Any]) -> Any:
         process = self._process
         if not self._ready or self._closing or process is None or process.stdin is None:
             raise RuntimeError("桌宠窗口尚未就绪，请检查 desktop_pet.enabled 和 desktop_pet.status")
         command_id = uuid.uuid4().hex
-        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self._pending[command_id] = future
         try:
             # 回执与超时覆盖管道背压，不能把“写入管道”误报为窗口已完成操作。
-            async with asyncio.timeout(COMMAND_TIMEOUT):
+            async with asyncio.timeout(15 if command["type"] == "skin" else COMMAND_TIMEOUT):
                 async with self._write_lock:
                     # 图片气泡可能携带较大的 base64，序列化不能占用主循环。
                     payload = await asyncio.to_thread(
@@ -206,13 +217,29 @@ class DesktopPetService:
                     )
                     process.stdin.write(payload)
                     await process.stdin.drain()
-                    await future
+                    result = await future
                     if command["type"] in {"show", "hide"}:
                         self._visible = command["type"] == "show"
+                    return result
         finally:
             self._pending.pop(command_id, None)
             if not future.done():
                 future.cancel()
+
+    async def apply_skin(self, skin_id: str) -> None:
+        from .skins import find_skin
+
+        skin = await asyncio.to_thread(find_skin, get_instance_root(), skin_id)
+        await self._command({"type": "skin", "skin": skin})
+        self._skin_id = skin_id
+        self._error = ""
+
+    async def animation(self, owner: str, action: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        result = await self._command({"type": "animation", "owner": owner, "action": action, "args": args})
+        if "error" in result:
+            error = result["error"]
+            raise ValueError(f"{error['code']}: {error['message']}")
+        return result
 
     async def control(self, action: str, *, text: str = "", active: bool = True) -> Dict[str, Any]:
         """仅接受已校验的公开操作，调用方负责切换到主循环。"""

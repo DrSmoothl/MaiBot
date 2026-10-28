@@ -22,6 +22,8 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: "Plug
     cap_service.register_capability("internal_chat.send", internal_chat.send)
     for action in ("status", "show", "hide", "say", "set_thinking"):
         cap_service.register_capability(f"desktop_pet.{action}", desktop_pet.control)
+    for action in desktop_pet.ANIMATION_ACTIONS:
+        cap_service.register_capability(f"desktop_pet.{action}", desktop_pet.animation)
     for name in ("files.list", "files.read_text", "files.download", "files.upload", "files.send"):
         cap_service.register_capability(name, file_capability)
 

@@ -71,7 +71,7 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "src.computer" = ["guest.ps1"]
-"src.desktop_pet" = ["web/*.html", "LICENSE"]
+"src.desktop_pet" = ["web/*.html", "web/*.js", "LICENSE"]
 "*" = ["_manifest.json", "config_schema.json", "LICENSE", "LICENSE-MAIBOT-GPL.md"]
 
 [dependency-groups]
