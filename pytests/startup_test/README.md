@@ -56,7 +56,7 @@ Worker、无外部停止请求的内部关闭，以及 Windows 无控制台 CTRL
 Runner 的循环停止判定与 `Popen()` 不是原子操作：判定后才到达的信号可能让一个 Worker
 短暂启动，随后立即被通知关闭；本修复不承诺停止与进程创建之间的零窗口屏障。
 Worker 生命周期中统一拥有信号并临时替换 Uvicorn capture_signals，退出时恢复；升级
-Uvicorn 后应重新验证这一非公开调用链兼容点。本轮按 `uv.lock` 的 0.45.0 验证；
+Uvicorn 后应重新验证这一非公开调用链兼容点。本轮使用 Uvicorn 0.45.0 验证；
 maim_message 会自行创建 Server，因此替换发生在类上。
 
 旧 Linux/Docker CI `Shutdown Linux Isolation #33423491114` 属于合并前的历史证据。

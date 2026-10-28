@@ -15,7 +15,7 @@ import json
 import uuid
 
 from src.common.data_models.llm_service_data_models import LLMResponseResult
-from src.common.i18n import get_locale
+from src.common.prompt_i18n import load_prompt
 from src.common.paths import get_instance_root
 from src.core.tooling import (
     ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec,
@@ -138,7 +138,7 @@ async def _generate_planner_response(
     remote_cwd = session_cwd(config, cwd)
     await asyncio.to_thread(cwd.mkdir, parents=True, exist_ok=True)
     policy = await asyncio.to_thread(
-        (Path(__file__).parent / "prompts/planner" / f"{get_locale()}.txt").read_text, encoding="utf-8",
+        load_prompt, "agent_planner",
     )
     manifest = desktop_manifest(config)
     identity = {"connection": config.connection, "cwd": str(cwd)}
@@ -188,14 +188,12 @@ async def _generate_planner_response(
         )
         if state.data["pending"] is not None:
             notice = await asyncio.to_thread(
-                (Path(__file__).parent / "prompts/planner" / f"{get_locale()}.resume.txt").read_text,
-                encoding="utf-8",
+                load_prompt, "agent_planner_resume",
             )
             prompt.insert(0, {"type": "text", "text": notice})
         if not prompt:
             notice = await asyncio.to_thread(
-                (Path(__file__).parent / "prompts/planner" / f"{get_locale()}.continue.txt").read_text,
-                encoding="utf-8",
+                load_prompt, "agent_planner_continue",
             )
             prompt.append({"type": "text", "text": notice})
         # 先记录在途状态；崩溃后仅恢复上下文，不采用上次尚未交付的工具决策。

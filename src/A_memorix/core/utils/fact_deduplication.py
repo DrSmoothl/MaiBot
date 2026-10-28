@@ -3,7 +3,6 @@
 from contextlib import asynccontextmanager
 from difflib import SequenceMatcher
 from itertools import zip_longest
-from pathlib import Path
 from typing import Any, Dict, List, Sequence
 from weakref import WeakValueDictionary
 
@@ -311,7 +310,6 @@ class FactDeduplicator:
                     request_type="A_Memorix.FactDeduplication",
                     prompt=load_prompt(
                         "a_memorix_fact_deduplication",
-                        prompts_root=Path(__file__).with_name("prompts"),
                         payload=json.dumps(
                             {
                                 "facts": [{"fact_id": row["fact_id"], "text": row["text"]} for row in batch],

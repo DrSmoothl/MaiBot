@@ -182,3 +182,43 @@ description = "AI 検索の回答が根拠検証に失敗した場合に、根�
 display_name = "WebUI AI 検索の根拠メッセージ"
 advanced = true
 description = "AI 検索の読み取り専用ツールの結果を、ツールなしのリクエストで使える根拠メッセージに変換します。"
+
+[a_memorix_fact_deduplication]
+display_name = "長期記憶の事実重複判定"
+advanced = true
+description = "新しい事実と既存の記憶の重複を判定し、別の出来事、状態変化、矛盾する情報を保持します。"
+
+[agent_acp]
+display_name = "外部 Agent 接続ガイド"
+advanced = true
+description = "外部 Agent 接続ガイド。"
+
+[agent_acp_computer]
+display_name = "外部 Agent のコンピューター操作"
+advanced = true
+description = "外部 Agent のコンピューター操作。"
+
+[agent_acp_environment]
+display_name = "外部 Agent 環境説明"
+advanced = true
+description = "外部 Agent 環境説明。"
+
+[agent_acp_failure]
+display_name = "外部 Agent 失敗報告"
+advanced = true
+description = "外部 Agent 失敗報告。"
+
+[agent_planner]
+display_name = "外部 Planner 接続ガイド"
+advanced = true
+description = "外部 Planner 接続ガイド。"
+
+[agent_planner_resume]
+display_name = "外部 Planner 中断復帰"
+advanced = true
+description = "外部 Planner 中断復帰。"
+
+[agent_planner_continue]
+display_name = "外部 Planner 継続実行"
+advanced = true
+description = "外部 Planner 継続実行。"

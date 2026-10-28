@@ -29,6 +29,8 @@ from src.config.config import global_config, model_config
 from src.agent.provider import AgentToolProvider
 from src.computer.provider import ComputerToolProvider
 from src.files.provider import FileToolProvider
+from src.desktop_pet.chat_tools import ChatSessionToolProvider
+from src.desktop_pet.todo_tools import TodoToolProvider
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
@@ -1340,6 +1342,8 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         )
         self._tool_registry.register_provider(PluginToolProvider())
         self._tool_registry.register_provider(AgentToolProvider())
+        self._tool_registry.register_provider(ChatSessionToolProvider())
+        self._tool_registry.register_provider(TodoToolProvider())
         self._tool_registry.register_provider(ComputerToolProvider())
         self._tool_registry.register_provider(FileToolProvider())
         self._tool_registry.register_provider(MCPToolProvider(get_mcp_service()))

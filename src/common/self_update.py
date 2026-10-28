@@ -49,7 +49,7 @@ OFFICIAL_REPOSITORY_PATH = "Mai-with-u/MaiBot"
 OFFICIAL_REPOSITORY_URL = f"https://github.com/{OFFICIAL_REPOSITORY_PATH}.git"
 OFFICIAL_SOURCE_ID = "github"
 SUPPORTED_BRANCHES: Tuple[str, ...] = ("main", "dev")
-DEPENDENCY_FILES = frozenset({"pyproject.toml", "uv.lock", "requirements.txt"})
+DEPENDENCY_FILES = frozenset({"pyproject.toml", "requirements.txt"})
 
 PENDING_MAX_AGE_SECONDS = 600.0
 GIT_TIMEOUT_SECONDS = 120.0

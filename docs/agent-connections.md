@@ -56,7 +56,11 @@ mcp_port = 0
 
 Desktop 模式需要在 Desktop 侧安装 `dsh-maibot-bridge`，启动后生成 `~/.dsh/maibot-desktop.json`。麦麦选择 `connection = "dsh_desktop"`，`desktop_manifest` 留空使用上述默认文件，也可指定绝对路径。
 
-截至本次修复，原桥接插件仓库仍为私有，公开用户无法从原 Release 地址下载（[#2285](https://github.com/Mai-with-u/MaiBot/issues/2285)）。主程序不包含该插件；如果没有插件安装包，请先使用 CLI 模式。已有源码或安装包的用户可在 Desktop 的插件安装入口安装。发布插件是独立事项。
+桥接插件仓库及 [v0.1.1 安装包](https://github.com/SengokuCola/dsh-maibot-bridge/releases/download/v0.1.1/dsh-maibot-bridge-0.1.1.tgz) 已公开，无需 GitHub 登录即可下载。主程序不包含该插件；使用 Desktop 自带的 dsh 命令安装后重启 Desktop，也可在 Desktop 的插件安装入口选择本地源码目录。
+
+```powershell
+dsh plugin --profile desktop add https://github.com/SengokuCola/dsh-maibot-bridge/releases/download/v0.1.1/dsh-maibot-bridge-0.1.1.tgz
+```
 
 Desktop 桥接和麦麦工具服务都仅监听回环地址。远程 Desktop 可以使用 SSH 隧道，无需修改为公网监听：
 

@@ -270,6 +270,7 @@ def resolve_prompt_path(
     prompts_root: Path | None = None,
     custom_prompts_root: Path | None = None,
     include_legacy_custom: bool = False,
+    include_custom: bool = True,
 ) -> Path:
     resolved_prompts_root = get_prompts_root(prompts_root)
     resolved_custom_prompts_root = get_custom_prompts_root(custom_prompts_root, prompts_root)
@@ -285,10 +286,10 @@ def resolve_prompt_path(
                 normalized_category,
                 resolved_custom_prompts_root,
             )
-            if custom_path is not None:
+            if include_custom and custom_path is not None:
                 return custom_path
 
-            if include_legacy_custom:
+            if include_custom and include_legacy_custom:
                 legacy_custom_path = _resolve_legacy_custom_prompt_path(normalized_name, resolved_custom_prompts_root)
                 if legacy_custom_path is not None:
                     return legacy_custom_path
@@ -311,10 +312,10 @@ def resolve_prompt_path(
                 None,
                 resolved_custom_prompts_root,
             )
-            if custom_path is not None:
+            if include_custom and custom_path is not None:
                 return custom_path
 
-            if include_legacy_custom:
+            if include_custom and include_legacy_custom:
                 legacy_custom_path = _resolve_legacy_custom_prompt_path(normalized_name, resolved_custom_prompts_root)
                 if legacy_custom_path is not None:
                     return legacy_custom_path
@@ -324,7 +325,7 @@ def resolve_prompt_path(
                 if candidate_path.is_file():
                     return candidate_path
 
-    raise FileNotFoundError(t("prompt.template_not_found", locale=requested_locale, name=normalized_name))
+    raise FileNotFoundError(t("prompt.template_not_found", prompt_locale=requested_locale, name=normalized_name))
 
 
 @lru_cache(maxsize=None)
@@ -348,6 +349,7 @@ def load_prompt_template(
     prompts_root: Path | None = None,
     custom_prompts_root: Path | None = None,
     include_legacy_custom: bool = False,
+    include_custom: bool = True,
 ) -> ResolvedPromptTemplate:
     resolved_prompts_root = get_prompts_root(prompts_root)
     resolved_custom_prompts_root = get_custom_prompts_root(custom_prompts_root, prompts_root)
@@ -359,6 +361,7 @@ def load_prompt_template(
         prompts_root=resolved_prompts_root,
         custom_prompts_root=resolved_custom_prompts_root,
         include_legacy_custom=include_legacy_custom,
+        include_custom=include_custom,
     )
     prompt_locale = _get_locale_from_prompt_path(prompt_path, resolved_prompts_root)
     customized = False
@@ -409,6 +412,22 @@ def load_prompt(
         prompts_root=prompts_root,
         custom_prompts_root=custom_prompts_root,
     )
+    if resolved_template.customized and kwargs:
+        try:
+            return resolved_template.template.format(**kwargs)
+        except (KeyError, IndexError, ValueError, AttributeError):
+            # 旧自定义模板可能仍引用已移除的参数；保留原文件，改用当前内置模板。
+            default_template = load_prompt_template(
+                name=normalized_name,
+                locale=locale,
+                category=category,
+                prompts_root=prompts_root,
+                custom_prompts_root=custom_prompts_root,
+                include_custom=False,
+            )
+            rendered = _format_prompt_template(normalized_name, default_template.template, **kwargs)
+            logger.warning(t("prompt.template_outdated", name=normalized_name))
+            return rendered
     return _format_prompt_template(normalized_name, resolved_template.template, **kwargs)
 
 

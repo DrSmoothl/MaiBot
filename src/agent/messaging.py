@@ -1,6 +1,5 @@
 """独立 Agent 与 IM 共用的适配层：真实会话查询、传话和图片引用。"""
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -10,7 +9,7 @@ import time
 
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.common.data_models.message_component_data_model import ImageComponent
-from src.common.i18n import get_locale
+from src.common.prompt_i18n import load_prompt
 
 if TYPE_CHECKING:
     from .service import AgentService
@@ -104,11 +103,13 @@ async def report_failure(service: "AgentService", target: str, task_ids: List[st
     from src.chat.heart_flow.heartflow_manager import heartflow_manager
 
     resolve_chat(target)
-    path = Path(__file__).parent / "prompts" / "acp" / f"{get_locale()}.failure.txt"
-    template = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    message = await asyncio.to_thread(
+        load_prompt, "agent_acp_failure", agent_name=service.name,
+        task_ids=", ".join(task_ids), error=error,
+    )
     runtime = await heartflow_manager.get_or_create_heartflow_chat(target)
     runtime.enqueue_internal_task(
         source_kind=service.relay_kind,
-        text=template.format(name=service.name, task_ids=", ".join(task_ids), error=error),
+        text=message,
         reason=service.name + "执行失败",
     )

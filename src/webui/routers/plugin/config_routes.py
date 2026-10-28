@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, cast
 
 import asyncio
 
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, Cookie, HTTPException, Response
 from pydantic import TypeAdapter
 import tomlkit
 
@@ -592,3 +592,36 @@ async def toggle_plugin(plugin_id: str, maibot_session: Optional[str] = Cookie(N
     except Exception as e:
         logger.error(f"切换插件状态失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+
+
+async def _request_config_widgets(plugin_id: str, action_id: Optional[str] = None) -> Dict[str, Any]:
+    from src.plugin_runtime.config_widgets import ConfigWidgetSnapshot
+    from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+    try:
+        data = await run_on_main_loop(get_plugin_runtime_manager().config_widgets(plugin_id, action_id))
+        return ConfigWidgetSnapshot.model_validate(data).model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (RuntimeError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/config/{plugin_id}/widgets")
+async def get_config_widgets(
+    plugin_id: str, response: Response, maibot_session: Optional[str] = Cookie(None)
+) -> Dict[str, Any]:
+    """获取运行时快照；二维码不允许 HTTP 缓存。"""
+    require_plugin_token(maibot_session)
+    response.headers["Cache-Control"] = "no-store"
+    return await _request_config_widgets(plugin_id)
+
+
+@router.post("/config/{plugin_id}/widgets/{action_id}")
+async def invoke_config_widget(
+    plugin_id: str, action_id: str, response: Response, maibot_session: Optional[str] = Cookie(None)
+) -> Dict[str, Any]:
+    """执行当前插件声明的按钮，不接受配置补丁或任意方法名。"""
+    require_plugin_token(maibot_session)
+    response.headers["Cache-Control"] = "no-store"
+    return await _request_config_widgets(plugin_id, action_id)

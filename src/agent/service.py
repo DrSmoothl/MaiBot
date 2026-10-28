@@ -7,7 +7,7 @@ import asyncio
 import json
 
 from src.common.async_work import run_sync_work
-from src.common.i18n import get_locale
+from src.common.prompt_i18n import load_prompt
 from src.common.json_storage import read_json, write_json
 from src.common.logger import get_logger
 from src.common.paths import get_instance_root
@@ -61,13 +61,10 @@ class AgentService:
         return Path(self.config.acp_cwd).expanduser().absolute() if self.config.acp_cwd else self.root / "workspace"
 
     def policy(self) -> str:
-        folder = Path(__file__).parent / "prompts" / "acp"
-        locale = get_locale()
-        policy = (folder / f"{locale}.txt").read_text(encoding="utf-8")
         profile = {"nickname": global_config.bot.nickname, "personality": global_config.personality.personality}
-        policy = policy.replace("{maibot_profile}", json.dumps(profile, ensure_ascii=False))
+        policy = load_prompt("agent_acp", maibot_profile=json.dumps(profile, ensure_ascii=False))
         if self.computer.config.enabled:
-            policy += "\n" + (folder / f"{locale}.computer.txt").read_text(encoding="utf-8")
+            policy += "\n" + load_prompt("agent_acp_computer")
         return policy
 
     def image_path(self, reference: str) -> Path:
@@ -155,8 +152,7 @@ class AgentService:
     async def context(self) -> str:
         """仅提供任务所需的目录信息；能力由接入说明声明，运行状态通过工具按需查询。"""
         def render() -> str:
-            path = Path(__file__).parent / "prompts" / "acp" / f"{get_locale()}.environment.txt"
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = load_prompt("agent_acp_environment").splitlines()
             # 本机连接只显示一次目录；远程连接必须保留麦麦侧附图路径的边界。
             if not self.config.acp_remote_cwd:
                 lines = [line for line in lines if "{maibot_workspace}" not in line]

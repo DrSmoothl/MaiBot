@@ -193,7 +193,29 @@ export interface ConfigLayoutSchema {
 /**
  * 插件配置 Schema
  */
+export interface ConfigWidget {
+  id: string
+  kind: 'qrcode' | 'status' | 'action'
+  label: string
+  confirmation?: string | null
+}
+
+export interface ConfigWidgetState {
+  text: string
+  tone: 'neutral' | 'success' | 'warning' | 'error'
+  image?: string | null
+  expires_at?: number | null
+  visible: boolean
+  disabled: boolean
+}
+
+export interface ConfigWidgetSnapshot {
+  widgets: ConfigWidget[]
+  states: Record<string, ConfigWidgetState>
+}
+
 export interface PluginConfigSchema {
+  runtime_widgets?: ConfigWidget[]
   plugin_id: string
   plugin_info: {
     name: string

@@ -182,3 +182,43 @@ description = "Asks the model to remove unsupported content and rewrite the fina
 display_name = "WebUI AI Search Evidence Message"
 advanced = true
 description = "Wraps read-only tool results from AI search as evidence messages usable in requests without tools."
+
+[a_memorix_fact_deduplication]
+display_name = "Long-term memory fact deduplication"
+advanced = true
+description = "Compare new facts with existing memories while preserving distinct events, state changes, and conflicting information."
+
+[agent_acp]
+display_name = "External agent policy"
+advanced = true
+description = "External agent policy。"
+
+[agent_acp_computer]
+display_name = "External agent computer usage"
+advanced = true
+description = "External agent computer usage。"
+
+[agent_acp_environment]
+display_name = "External agent environment"
+advanced = true
+description = "External agent environment。"
+
+[agent_acp_failure]
+display_name = "External agent failure report"
+advanced = true
+description = "External agent failure report。"
+
+[agent_planner]
+display_name = "External planner policy"
+advanced = true
+description = "External planner policy。"
+
+[agent_planner_resume]
+display_name = "External planner recovery"
+advanced = true
+description = "External planner recovery。"
+
+[agent_planner_continue]
+display_name = "External planner continuation"
+advanced = true
+description = "External planner continuation。"

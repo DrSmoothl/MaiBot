@@ -8,18 +8,16 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 import os
-import subprocess
 import sys
-import time
 
 import tomlkit
+
+from release_dependencies import run_with_published_package
 
 
 PACKAGE_NAME = os.environ.get("DASHBOARD_PACKAGE_NAME", "maibot-dashboard")
 PYPROJECT_PATH = Path("pyproject.toml")
 REQUIREMENTS_PATH = Path("requirements.txt")
-CHECK_INTERVAL_SECONDS = 15
-MAX_CHECK_ATTEMPTS = 40
 
 
 def find_dashboard_requirement(requirements: Iterable[str]) -> Requirement:
@@ -34,7 +32,7 @@ def find_dashboard_requirement(requirements: Iterable[str]) -> Requirement:
 
 
 def wait_for_published_version(target_version: Version) -> None:
-    # JSON/Simple 索引可见不等于 uv 能解析；使用同一解析器、索引配置和 Python 范围确认。
+    # JSON/Simple 索引可见不等于 uv 能解析；与最终安装统一从官方源刷新并解析。
     # 临时项目只探测 Dashboard，不修改真实依赖声明、锁文件或虚拟环境。
     document = tomlkit.parse(PYPROJECT_PATH.read_text(encoding="utf-8"))
     probe = tomlkit.document()
@@ -44,30 +42,13 @@ def wait_for_published_version(target_version: Version) -> None:
         "requires-python": document["project"]["requires-python"],
         "dependencies": [f"{PACKAGE_NAME}=={target_version}"],
     }
-    if "tool" in document and "uv" in document["tool"]:
-        probe["tool"] = {"uv": document["tool"]["uv"].unwrap()}
-
     with TemporaryDirectory(prefix="maibot-dashboard-release-") as probe_dir:
         (Path(probe_dir) / "pyproject.toml").write_text(tomlkit.dumps(probe), encoding="utf-8")
         command = [
             "uv", "lock", "--project", probe_dir, "--python", sys.executable,
-            "--upgrade-package", PACKAGE_NAME, "--refresh-package", PACKAGE_NAME,
+            "--upgrade-package", PACKAGE_NAME,
         ]
-        for attempt in range(1, MAX_CHECK_ATTEMPTS + 1):
-            print(f"确认 uv 可解析 {PACKAGE_NAME}=={target_version}（第 {attempt}/{MAX_CHECK_ATTEMPTS} 次）", flush=True)
-            result = subprocess.run(command, capture_output=True, text=True, timeout=120)
-            if result.returncode == 0:
-                print(f"uv 已成功解析 Dashboard 版本: {target_version}", flush=True)
-                return
-            details = (result.stderr + "\n" + result.stdout).strip()
-            # 仅等待目标版本缺失这一发布同步状态；配置、网络和其他依赖错误立即暴露。
-            missing_version = f"no version of {canonicalize_name(PACKAGE_NAME)}=={target_version}" in details.lower()
-            if result.returncode != 1 or not missing_version:
-                raise RuntimeError(f"uv 检查失败，不能作为发布同步延迟重试:\n{details}")
-            print(details, flush=True)
-            if attempt < MAX_CHECK_ATTEMPTS:
-                time.sleep(CHECK_INTERVAL_SECONDS)
-        raise RuntimeError(f"经过 {MAX_CHECK_ATTEMPTS} 次检查，uv 仍无法解析 {PACKAGE_NAME}=={target_version}:\n{details}")
+        run_with_published_package(command, PACKAGE_NAME, str(target_version), cwd=Path(probe_dir))
 
 
 def update_pyproject(target_version: Version) -> bool:

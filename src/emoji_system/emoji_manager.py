@@ -1197,6 +1197,8 @@ class EmojiManager:
                         logger.debug(f"[emoji_maintenance] Emoji already registered, keep file: {emoji_file.name}")
                     else:
                         logger.debug(f"[emoji_maintenance] Emoji not registered, keep file: {emoji_file.name}")
+                    # 拒绝替换或处理失败也结束本轮，避免积压文件连续触发模型请求。
+                    break
 
             try:
                 await asyncio.to_thread(self.check_emoji_file_integrity)
@@ -1267,6 +1269,8 @@ class EmojiManager:
             return "failed"
 
         if self._emoji_num >= global_config.emoji.max_reg_num and global_config.emoji.do_replace:
+            # 已有描述的候选也需要记录处理状态，避免拒绝替换后被维护任务反复选中。
+            await asyncio.to_thread(self._mark_emoji_vlm_processed, target_emoji)
             logger.warning(
                 f"[register_emoji] Emoji limit {global_config.emoji.max_reg_num} reached, trying replacement"
             )

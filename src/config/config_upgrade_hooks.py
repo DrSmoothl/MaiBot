@@ -535,6 +535,30 @@ def _merge_wildcard_learning_rules_into_defaults(data: Dict[str, Any]) -> List[s
     return reasons
 
 
+def _migrate_webui_http_bindings(data: Dict[str, Any]) -> List[str]:
+    """8.15.62: 一次性迁移旧 WebUI 监听配置，已存在的 HTTP 字段优先。"""
+    webui = data.get("webui")
+    if not isinstance(webui, dict) or not any(key in webui for key in ("host", "port")):
+        return []
+
+    http = data.setdefault("http", {})
+    if not isinstance(http, dict):
+        raise ValueError("http 配置必须为 TOML 配置节")
+
+    reasons: List[str] = []
+    for key in ("host", "port"):
+        if key not in webui:
+            continue
+        value = webui.pop(key)
+        # 按字段补齐，显式的新值（包括默认值或非法值）均保留，由配置校验处理。
+        if key not in http:
+            if key == "host" and isinstance(value, str):
+                value = [value]
+            http[key] = value
+        reasons.append(f"webui.{key}->http.{key}")
+    return reasons
+
+
 BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
     ConfigUpgradeHook(
         target_version="8.10.11",
@@ -590,6 +614,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.15.37",
         config_names=("bot_config.toml",),
         migrate=_move_planner_message_steering_to_reply_timing,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.15.62",
+        config_names=("bot_config.toml",),
+        migrate=_migrate_webui_http_bindings,
     ),
 )
 
