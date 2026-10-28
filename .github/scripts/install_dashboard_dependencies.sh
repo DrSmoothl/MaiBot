@@ -2,6 +2,27 @@
 # Run from dashboard/. Keep the install failure visible after collecting diagnostics.
 set -euo pipefail
 
+# GitHub runners use the official registry; local installs keep their mirror URLs.
+# Only transport URLs change: package versions and integrity hashes stay locked.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  node <<'NODE'
+const fs = require('node:fs');
+const replacements = [
+  ['https://mirrors.cloud.tencent.com/npm/', 'https://registry.npmjs.org/'],
+  ['https://registry.npmmirror.com/', 'https://registry.npmjs.org/'],
+];
+for (const filename of ['bun.lock', 'bunfig.toml']) {
+  const original = fs.readFileSync(filename, 'utf8');
+  let updated = original;
+  for (const [mirror, registry] of replacements) {
+    updated = updated.replaceAll(mirror, registry);
+  }
+  fs.writeFileSync(filename, updated);
+  console.log(`${filename}: using npm official registry in GitHub Actions`);
+}
+NODE
+fi
+
 if bun install --frozen-lockfile --verbose; then
   exit 0
 else
