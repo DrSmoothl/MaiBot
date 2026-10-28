@@ -73,9 +73,9 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/sec-install-night.svg"><img src="depends-data/readme/sec-install-day.svg" alt="安装 · INSTALL" width="100%"></picture>
 
-**最新版本: v1.3.16**
+**最新版本: v1.3.17**
 
-<sub><sup><strong>Latest Version: v1.3.16</strong></sup></sub>
+<sub><sup><strong>Latest Version: v1.3.17</strong></sup></sub>
 
 - **发布**：[Release](https://github.com/Mai-with-u/MaiBot/releases/) 页面展示了最新发布的正式版。
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/Mai-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>
@@ -114,6 +114,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 | 群组 / Group | 说明 / Description |
 | :--- | :--- |
+| 麦麦最新交流群:995845542<br><sub><sup>Mai Newest</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
 | 麦麦脑电图:571780722<br><sub><sup>MaiBrain EEG</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
 | 麦麦大脑磁共振:766798517<br><sub><sup>MaiBrain MRI</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
 | [麦麦要当 VTB](https://qm.qq.com/q/wGePTl1UyY)<br><sub><sup>Mai Wants to Be a VTuber</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
@@ -127,8 +128,6 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
   <sub><sup>Let MaiSaka stream on Bilibili.</sup></sub>
 - **[MoFox_Bot](https://github.com/MoFox-Studio/MoFox-Core)**：基于 MaiCore 0.10.0 的 Fork。  
   <sub><sup>An enhanced fork based on MaiCore 0.10.0.</sup></sub>
-- **[MaiCraft](https://github.com/MaiM-with-u/Maicraft)**：让麦麦陪你玩 Minecraft（暂时停止维护中）。  
-  <sub><sup>Let MaiSaka accompany you in Minecraft (currently paused).</sup></sub>
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/sec-idea-night.svg"><img src="depends-data/readme/sec-idea-day.svg" alt="设计理念 · IDEA" width="100%"></picture>
 
