@@ -177,3 +177,43 @@ description = "用于在 AI 搜索回答未通过证据校验时，要求模型�
 display_name = "WebUI AI 搜索证据消息"
 advanced = true
 description = "用于把 AI 搜索中只读工具的返回结果包装成无工具请求可用的证据消息。"
+
+[a_memorix_fact_deduplication]
+display_name = "长期记忆事实去重"
+advanced = true
+description = "判断新事实与已有记忆是否重复，保留独立事件、状态变化和矛盾信息。"
+
+[agent_acp]
+display_name = "外接 Agent 接入说明"
+advanced = true
+description = "外接 Agent 接入说明。"
+
+[agent_acp_computer]
+display_name = "外接 Agent 电脑使用"
+advanced = true
+description = "外接 Agent 电脑使用。"
+
+[agent_acp_environment]
+display_name = "外接 Agent 环境说明"
+advanced = true
+description = "外接 Agent 环境说明。"
+
+[agent_acp_failure]
+display_name = "外接 Agent 失败回报"
+advanced = true
+description = "外接 Agent 失败回报。"
+
+[agent_planner]
+display_name = "外接 Planner 接入说明"
+advanced = true
+description = "外接 Planner 接入说明。"
+
+[agent_planner_resume]
+display_name = "外接 Planner 中断恢复"
+advanced = true
+description = "外接 Planner 中断恢复。"
+
+[agent_planner_continue]
+display_name = "外接 Planner 继续执行"
+advanced = true
+description = "外接 Planner 继续执行。"

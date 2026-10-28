@@ -133,6 +133,36 @@ def test_load_prompt_strict_mode_raises_on_missing_placeholder(tmp_path: Path, m
     assert "current_time" in str(exc_info.value)
 
 
+@pytest.mark.parametrize("outdated_template", ["Old {removed_name}", "Old {user_name", "Old {}"])
+def test_outdated_custom_prompt_uses_builtin_template(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, outdated_template: str
+) -> None:
+    prompts_root = tmp_path / "prompts"
+    custom_root = tmp_path / "custom"
+    write_prompt(prompts_root, "zh-CN", "replyer", "默认 {user_name}")
+    write_prompt(prompts_root, "en-US", "replyer", "Default {user_name}")
+    write_prompt(custom_root, "en-US", "replyer", outdated_template)
+    write_prompt(custom_root, "zh-CN", "replyer", "Other custom {removed_name}")
+
+    assert load_prompt(
+        "replyer", locale="en-US", prompts_root=prompts_root,
+        custom_prompts_root=custom_root, user_name="Mai",
+    ) == "Default Mai"
+    assert "已过期，使用默认模板" in caplog.text
+    assert all(record.exc_info is None and record.levelname == "WARNING" for record in caplog.records)
+    assert (custom_root / "en-US" / "replyer.prompt").read_text(encoding="utf-8") == outdated_template
+
+
+def test_missing_prompt_message_includes_name_and_locale(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    with pytest.raises(FileNotFoundError) as exc_info:
+        load_prompt("missing_template", locale="en-US", prompts_root=tmp_path)
+
+    assert "missing_template" in str(exc_info.value)
+    assert "en-US" in str(exc_info.value)
+    assert "{locale}" not in str(exc_info.value)
+    assert not caplog.records
+
+
 def test_load_prompt_rejects_path_traversal(tmp_path: Path) -> None:
     prompts_root = tmp_path / "prompts"
     write_prompt(prompts_root, "zh-CN", "replyer", "你好")
