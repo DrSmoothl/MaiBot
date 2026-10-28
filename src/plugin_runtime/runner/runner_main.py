@@ -80,6 +80,7 @@ from src.plugin_runtime.runner.log_handler import RunnerIPCLogHandler
 from src.plugin_runtime.runner.plugin_paths import PluginPaths, build_plugin_paths
 from src.plugin_runtime.runner.plugin_loader import PluginCandidate, PluginLoader, PluginMeta
 from src.plugin_runtime.runner.rpc_client import RPCClient
+from src.plugin_runtime.config_widgets import ConfigWidgetProvider, invoke_widget_action, read_widget_snapshot
 from src.plugin_runtime.webui_schema import load_webui_extension
 
 logger = get_logger("plugin_runtime.runner.main")
@@ -462,6 +463,7 @@ class PluginRunner:
         self._start_time: float = time.monotonic()
         self._shutting_down: bool = False
         self._reload_lock: asyncio.Lock = asyncio.Lock()
+        self._config_widget_locks: Dict[str, asyncio.Lock] = {}
         self._inflight_rpcs: Dict[int, InFlightRPC] = {}
 
         # IPC 日志 Handler：握手成功后安装，将所有 stdlib logging 转发到 Host
@@ -1312,6 +1314,7 @@ class PluginRunner:
         self._rpc_client.register_method("plugin.prepare_shutdown", self._handle_prepare_shutdown)
         self._rpc_client.register_method("plugin.shutdown", self._handle_shutdown)
         self._rpc_client.register_method("plugin.config_updated", self._handle_config_updated)
+        self._rpc_client.register_method("plugin.config_widgets", self._handle_config_widgets)
         self._rpc_client.register_method("plugin.inspect_config", self._handle_inspect_plugin_config)
         self._rpc_client.register_method("plugin.validate_config", self._handle_validate_plugin_config)
         self._rpc_client.register_method("plugin.reload", self._handle_reload_plugin)
@@ -2448,6 +2451,35 @@ class PluginRunner:
             finally:
                 self._finish_inflight_rpc(inflight)
         return envelope.make_response(payload={"acknowledged": True})
+
+    async def _handle_config_widgets(self, envelope: Envelope) -> Envelope:
+        """操作真实已加载实例；禁止临时实例触发登录等运行时副作用。"""
+        plugin_id = envelope.plugin_id
+        lock = self._config_widget_locks.setdefault(plugin_id, asyncio.Lock())
+        if lock.locked():
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "配置页操作进行中，请稍后重试")
+        async with lock:
+            meta = self._loader.get_plugin(plugin_id)
+            if meta is None or meta.config_error:
+                return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "插件未运行或配置无效")
+            try:
+                action_id = envelope.payload.get("action_id")
+                if action_id is not None and (not isinstance(action_id, str) or not action_id):
+                    raise ValueError("操作 ID 无效")
+                widgets = self._get_plugin_config_schema(meta).get("runtime_widgets", [])
+                if not widgets:
+                    raise ValueError("插件未声明运行时控件")
+                provider = cast(ConfigWidgetProvider, meta.instance)
+                async with asyncio.timeout(8):
+                    snapshot = await read_widget_snapshot(provider, widgets)
+                    if action_id is not None:
+                        await invoke_widget_action(provider, snapshot, action_id)
+                        snapshot = await read_widget_snapshot(provider, widgets)
+                return envelope.make_response(payload=snapshot.model_dump())
+            except TimeoutError:
+                return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "配置页操作超时")
+            except Exception as exc:
+                return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, f"{type(exc).__name__}: {exc}")
 
     async def _handle_inspect_plugin_config(self, envelope: Envelope) -> Envelope:
         """处理插件配置元数据解析请求。

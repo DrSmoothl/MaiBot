@@ -977,6 +977,17 @@ class PluginRunnerSupervisor:
             raise ValueError("插件配置校验失败")
         return dict(result.normalized_config)
 
+    async def config_widgets(self, plugin_id: str, action_id: Optional[str] = None) -> Dict[str, Any]:
+        """读取配置页控件或执行声明的按钮，不写入配置。"""
+        self._ensure_accepting_runner_rpc()
+        response = await self._rpc_server.send_request(
+            "plugin.config_widgets", plugin_id=plugin_id,
+            payload={"action_id": action_id}, timeout_ms=10000,
+        )
+        if response.error:
+            raise ValueError(str(response.error.get("message", "配置页运行时请求失败")))
+        return response.payload
+
     async def inspect_plugin_config(
         self,
         plugin_id: str,

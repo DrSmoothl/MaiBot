@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Copy, Info, Loader2, Plus, Save, SlidersHorizontal, Trash2, UsersRound } from 'lucide-react'
+import { AlertCircle, Copy, Info, Loader2, MoreHorizontal, Plus, SlidersHorizontal, Trash2, UsersRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -8,8 +8,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -19,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useToast } from '@/hooks/use-toast'
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
 import { generateId } from '@/lib/id'
@@ -35,7 +37,7 @@ import type {
 
 interface AdapterHostPolicyPanelProps {
   pluginId: string
-  /** 账号、分组操作与保存工具栏的挂载点（页签同一行）；未提供时渲染在面板顶部 */
+  /** 账号与分组操作工具栏的挂载点（页签同一行）；未提供时渲染在面板顶部 */
   toolbarContainer?: HTMLElement | null
 }
 
@@ -46,8 +48,6 @@ interface AdapterHostPolicyEditorProps {
   hasEntry: boolean | undefined
   accountEntries: AdapterAccountEntry[] | undefined
   saveStatus: string | null
-  manualSaveDisabled: boolean
-  onManualSave: () => void
   onGroupsChange: (policy: AdapterHostPolicy) => void
   toolbarContainer?: HTMLElement | null
   onSectionChange: (
@@ -147,8 +147,6 @@ function AdapterHostPolicyEditor({
   hasEntry,
   accountEntries,
   saveStatus,
-  manualSaveDisabled,
-  onManualSave,
   onGroupsChange,
   toolbarContainer,
   onSectionChange,
@@ -239,49 +237,33 @@ function AdapterHostPolicyEditor({
             {saveStatus}
           </span>
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label="新建分组"
-          title="新建分组"
-          disabled={saveStatus === '自动保存中'}
-          onClick={() => { setGroupName(''); setGroupDialog('new') }}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label="复制当前组"
-          title="复制当前组"
-          disabled={saveStatus === '自动保存中'}
-          onClick={() => { setGroupName(''); setGroupDialog('copy') }}
-        >
-          <Copy className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label="管理分组"
-          title="管理分组"
-          onClick={() => setGroupDialog('manage')}
-        >
-          <SlidersHorizontal className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label="保存"
-          title="保存"
-          disabled={manualSaveDisabled}
-          onClick={onManualSave}
-        >
-          <Save className="h-4 w-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="sm" variant="outline" aria-label="分组操作" title="分组操作">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={saveStatus === '自动保存中'}
+              onSelect={() => { setGroupName(''); setGroupDialog('new') }}
+            >
+              <Plus className="h-4 w-4" />
+              新建分组
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={saveStatus === '自动保存中'}
+              onSelect={() => { setGroupName(''); setGroupDialog('copy') }}
+            >
+              <Copy className="h-4 w-4" />
+              复制当前组
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setGroupDialog('manage')}>
+              <SlidersHorizontal className="h-4 w-4" />
+              管理分组
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   )
@@ -353,16 +335,23 @@ function AdapterHostPolicyEditor({
           const denyInactive = effectiveAction === 'block' && !section.allow_ids.includes('*')
           const modeHint =
             effectiveAction === 'allow'
-              ? `黑名单模式：接收所有${chatLabel}消息，只需在「不接收消息的聊天ID」中添加要屏蔽的${idLabel}。`
-              : `白名单模式：默认不接收${chatLabel}消息，只需在「接收消息的聊天ID」中添加要接收的${idLabel}。`
+              ? `黑名单模式：接收所有${chatLabel}消息，只需在「拒收名单」中添加要屏蔽的${idLabel}。`
+              : `白名单模式：默认不接收${chatLabel}消息，只需在「接收名单」中添加要接收的${idLabel}。`
           return (
             <Card key={chatType}>
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-base">{title}</CardTitle>
-                    <CardDescription>不接收消息的聊天 ID 优先于接收消息的聊天 ID，支持使用 * 匹配全部。</CardDescription>
-                  </div>
+                  <CardTitle className="text-base">{title}</CardTitle>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button type="button" aria-label={`${title}帮助`} className="text-muted-foreground hover:text-foreground">
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>拒收优先，支持 * 匹配全部。</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
@@ -390,66 +379,55 @@ function AdapterHostPolicyEditor({
                   </p>
                 </div>
 
-                <div
-                  className={allowInactive ? 'space-y-2 opacity-50' : 'space-y-2'}
-                  data-testid={`allow-section:${chatType}`}
-                  data-inactive={allowInactive}
-                >
-                  <div>
-                    <Label>接收消息的聊天ID</Label>
-                    {allowInactive && (
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        当前接收所有消息，此列表不生效。
-                      </p>
-                    )}
+                {!allowInactive && (
+                  <div
+                    className="space-y-2"
+                    data-testid={`allow-section:${chatType}`}
+                  >
+                    <div>
+                      <Label>接收名单</Label>
+                    </div>
+                    <ListFieldEditor
+                      value={section.allow_ids}
+                      onChange={(value) =>
+                        onSectionChange(
+                          chatType,
+                          'allow_ids',
+                          value.map((item) => String(item))
+                        )
+                      }
+                      itemType="string"
+                      emptyText="空列表"
+                      placeholder={chatType === 'group' ? '输入接收消息的群号' : '输入接收消息的用户 ID'}
+                      renderItemSuffix={chatType === 'group' ? renderGroupIdentity : undefined}
+                    />
                   </div>
-                  <ListFieldEditor
-                    // 空列表时直接禁用；残留条目仍可编辑，方便清理
-                    disabled={allowInactive && section.allow_ids.length === 0}
-                    value={section.allow_ids}
-                    onChange={(value) =>
-                      onSectionChange(
-                        chatType,
-                        'allow_ids',
-                        value.map((item) => String(item))
-                      )
-                    }
-                    itemType="string"
-                    emptyText="空列表"
-                    placeholder={chatType === 'group' ? '输入接收消息的群号' : '输入接收消息的用户 ID'}
-                    renderItemSuffix={chatType === 'group' ? renderGroupIdentity : undefined}
-                  />
-                </div>
+                )}
 
-                <div
-                  className={denyInactive ? 'space-y-2 opacity-50' : 'space-y-2'}
-                  data-testid={`deny-section:${chatType}`}
-                  data-inactive={denyInactive}
-                >
-                  <div>
-                    <Label>不接收消息的聊天ID</Label>
-                    {denyInactive && (
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        当前默认不接收消息，此列表不生效。
-                      </p>
-                    )}
+                {!denyInactive && (
+                  <div
+                    className="space-y-2"
+                    data-testid={`deny-section:${chatType}`}
+                  >
+                    <div>
+                      <Label>拒收名单</Label>
+                    </div>
+                    <ListFieldEditor
+                      value={section.deny_ids}
+                      onChange={(value) =>
+                        onSectionChange(
+                          chatType,
+                          'deny_ids',
+                          value.map((item) => String(item))
+                        )
+                      }
+                      itemType="string"
+                      emptyText="空列表"
+                      placeholder={chatType === 'group' ? '输入不接收消息的群号' : '输入不接收消息的用户 ID'}
+                      renderItemSuffix={chatType === 'group' ? renderGroupIdentity : undefined}
+                    />
                   </div>
-                  <ListFieldEditor
-                    disabled={denyInactive && section.deny_ids.length === 0}
-                    value={section.deny_ids}
-                    onChange={(value) =>
-                      onSectionChange(
-                        chatType,
-                        'deny_ids',
-                        value.map((item) => String(item))
-                      )
-                    }
-                    itemType="string"
-                    emptyText="空列表"
-                    placeholder={chatType === 'group' ? '输入不接收消息的群号' : '输入不接收消息的用户 ID'}
-                    renderItemSuffix={chatType === 'group' ? renderGroupIdentity : undefined}
-                  />
-                </div>
+                )}
               </CardContent>
             </Card>
           )
@@ -565,7 +543,7 @@ export function AdapterHostPolicyPanel({
     [mutate]
   )
 
-  // 手动保存：取消尚未执行的自动保存，立即写回当前草稿
+  // 分组变更立即保存：取消尚未执行的自动保存，立即写回最新策略
   const saveNow = (nextPolicy = policy) => {
     if (autosaveTimerRef.current !== null) {
       window.clearTimeout(autosaveTimerRef.current)
@@ -627,8 +605,6 @@ export function AdapterHostPolicyPanel({
       hasEntry={policyQuery.data.has_entry}
       accountEntries={policyQuery.data.account_entries}
       saveStatus={saveStatus}
-      manualSaveDisabled={!hasUnsavedChanges || saveMutation.isPending}
-      onManualSave={() => saveNow()}
       onGroupsChange={(nextPolicy) => {
         setPolicy(nextPolicy)
         saveNow(nextPolicy)

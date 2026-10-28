@@ -1025,7 +1025,7 @@
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-main='true'] [data-plugin-config-title] {
-  font-size: clamp(1.8rem, 2.1vw, 2.25rem) !important;
+  font-size: clamp(1.5rem, 1.8vw, 1.875rem) !important;
   line-height: 1.08 !important;
 }
 

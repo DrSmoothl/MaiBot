@@ -136,12 +136,16 @@ export function usePluginList() {
 
   const openPluginConfig = (plugin: InstalledPlugin, tabId?: string | null) => {
     initialTargetHandledRef.current = true
-    setSelectedPlugin(plugin)
-    setSelectedPluginTab(tabId ?? undefined)
     const params = new URLSearchParams({ plugin: plugin.id })
     if (tabId) {
       params.set('tab', tabId)
     }
+    if (getPluginType(plugin) === 'adapter' && !adapterOnly) {
+      window.location.assign(`/adapter-management?${params.toString()}`)
+      return
+    }
+    setSelectedPlugin(plugin)
+    setSelectedPluginTab(tabId ?? undefined)
     window.history.replaceState(null, '', `${getPluginConfigRoutePath()}?${params.toString()}`)
   }
 

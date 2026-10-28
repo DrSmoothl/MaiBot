@@ -1478,6 +1478,15 @@ class PluginRuntimeManager(
             logger.warning(f"插件 {plugin_id} 运行时配置校验不可用，将回退到静态 Schema: {exc}")
             return None
 
+    async def config_widgets(self, plugin_id: str, action_id: Optional[str] = None) -> Dict[str, Any]:
+        """将请求送到插件所属 Runner，只允许已启动的运行时实例。"""
+        if not self._started:
+            raise RuntimeError("插件运行时未启动")
+        supervisor = self._get_supervisor_for_plugin(plugin_id)
+        if supervisor is None:
+            raise RuntimeError("插件未运行")
+        return await supervisor.config_widgets(plugin_id, action_id)
+
     async def inspect_plugin_config(
         self,
         plugin_id: str,
