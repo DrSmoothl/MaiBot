@@ -139,14 +139,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          if git diff --quiet -- pyproject.toml requirements.txt uv.lock; then
+          if git diff --quiet -- pyproject.toml requirements.txt; then
             echo "Dashboard dev 依赖已是 ${DASHBOARD_DEV_VERSION}"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml requirements.txt uv.lock
+          git add pyproject.toml requirements.txt
           git commit -m "chore: 更新 dashboard dev 依赖至 ${DASHBOARD_DEV_VERSION}"
           git pull --rebase origin dev
           git push origin HEAD:dev
