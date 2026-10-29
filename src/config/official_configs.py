@@ -839,7 +839,7 @@ class ChatConfig(ConfigBase):
     """允许麦麦在回复开头 @ 一个或多个用户，由模型根据聊天内容决定是否使用。"""
 
     max_context_size: int = Field(
-        default=30,
+        default=50,
         json_schema_extra={
             "label": {
                 "zh_CN": "群聊上下文",
@@ -855,7 +855,7 @@ class ChatConfig(ConfigBase):
     """群聊回复时参考的最近消息数量；越大越懂上下文，也更耗模型。"""
 
     max_private_context_size: int = Field(
-        default=60,
+        default=75,
         json_schema_extra={
             "label": {
                 "zh_CN": "私聊上下文",
