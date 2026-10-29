@@ -5001,10 +5001,12 @@ class LogConfig(ConfigBase):
         default_factory=lambda: [
             "faiss",
             "httpx",
+            "httpx2",
             "urllib3",
             "asyncio",
             "websockets",
             "httpcore",
+            "httpcore2",
             "requests",
             "sqlalchemy",
             "openai",
