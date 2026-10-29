@@ -145,11 +145,41 @@ class BotConfig(ConfigBase):
     """别人可能用来称呼麦麦的名字，用于辅助识别提及。"""
 
 
+class PersonalityProfile(ConfigBase):
+    """可手动切换的人设快照。"""
+
+    name: str = Field(min_length=1, pattern=r"\S")
+    """人设名称。"""
+    personality: str
+    """人格和身份设定。"""
+    behavior_style: str
+    """行为风格。"""
+    reply_style: str
+    """表达风格。"""
+    multiple_reply_style: List[str] = Field(default_factory=list)
+    """备用表达风格。"""
+    multiple_probability: float = Field(default=0, ge=0, le=1)
+    """备用表达风格触发概率。"""
+
+
 class PersonalityConfig(ConfigBase):
     """人格配置类"""
 
     __ui_parent__ = "bot"
     __ui_label__ = "人格"
+
+    profiles: List[PersonalityProfile] = Field(default_factory=list, json_schema_extra={"x-widget": "custom"})
+    """备选人设库，由 WebUI 保存与切换；运行时使用下方当前人设字段。"""
+
+    selected_profile: str = Field(default="", json_schema_extra={"x-widget": "custom"})
+    """当前编辑的人设名称，空字符串表示尚未存入人设库。"""
+
+    def model_post_init(self, context: Optional[object] = None) -> None:
+        """名称作为切换标识，不能重复。"""
+        super().model_post_init(context)
+        names = [profile.name for profile in self.profiles]
+        if len(names) != len(set(names)):
+            raise ValueError("备选人设名称不能重复")
 
     personality: str = Field(
         default="是女大学生，现在正在上网聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。",

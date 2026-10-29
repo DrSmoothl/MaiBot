@@ -12,6 +12,7 @@ import { RoutePendingFallback } from './components/route-pending-fallback'
 import { checkAuth } from './hooks/use-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
 import { rememberMarketInstall } from './lib/plugin-market-navigation'
+import { rememberPersonalityImport } from './lib/personality-import'
 
 // Root 路由
 const rootRoute = createRootRoute({
@@ -91,6 +92,9 @@ const botConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/bot',
   beforeLoad: ({ location }) => {
+    if (rememberPersonalityImport(location.hash)) {
+      throw redirect({ href: '/config/bot?tab=bot', replace: true })
+    }
     const params = new URLSearchParams(location.searchStr)
     if (params.get('mode') !== 'webui') return
     params.delete('mode')

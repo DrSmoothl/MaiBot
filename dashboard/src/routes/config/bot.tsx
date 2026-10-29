@@ -91,6 +91,7 @@ import {
 } from './bot/hooks'
 import { CommandPermissions } from './bot/CommandPermissions'
 import { GlobalLearningSettings } from './bot/GlobalLearningSettings'
+import { PersonalityProfiles } from './bot/PersonalityProfiles'
 import { MemorySwitchGuard, MemorySwitchProvider } from './bot/MemorySwitchGuard'
 
 type ConfigSectionData = Record<string, unknown>
@@ -1165,9 +1166,13 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       schema: { ...schema, fields: [{ ...field, label, advanced: false }], nested: {} },
     }]
   })
-  const sectionLeadingContent = identitySchema ? {
+  const sectionLeadingContent = {
     personality: (
       <div className="space-y-3">
+        <PersonalityProfiles
+          values={sectionValues.personality ?? {}}
+          onChange={(value) => updateSectionValueByPath('personality', [], value)}
+        />
         {identitySchema && (
           <DynamicConfigForm
             schema={identitySchema}
@@ -1180,7 +1185,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
         )}
       </div>
     ),
-  } : undefined
+  }
   const sectionTrailingContent = {
     personality: (
       <GlobalLearningSettings
@@ -1239,7 +1244,8 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       return {
         ...schema,
         uiLabel: '身份与人格',
-        fields: schema.fields.filter((field) => !alternateStyleFieldNames.includes(field.name)),
+        fields: schema.fields.filter((field) => ![...alternateStyleFieldNames, 'profiles', 'selected_profile'].includes(field.name)),
+        nested: Object.fromEntries(Object.entries(schema.nested ?? {}).filter(([name]) => name !== 'profiles')),
       }
     }
     if (sectionName === 'chat' && replyStyleSchema) {
