@@ -222,7 +222,9 @@ const filesRoute = createRoute({
 const agentRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/agent',
-  component: lazyRouteComponent(() => import('./routes/agent'), 'AgentPage'),
+  beforeLoad: () => {
+    throw redirect({ to: '/chat', search: { agent: true }, replace: true })
+  },
 })
 
 // 移动端管理页路由：底部标签栏「管理」，汇总侧栏的全部入口
@@ -236,7 +238,8 @@ const manageRoute = createRoute({
 const chatRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/chat',
-  validateSearch: (search: Record<string, unknown>): { setupTrial?: boolean; observe?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { setupTrial?: boolean; observe?: string; agent?: boolean } => ({
+    agent: search.agent === true || search.agent === 'true' ? true : undefined,
     setupTrial: search.setupTrial === true || search.setupTrial === 'true' ? true : undefined,
     observe: typeof search.observe === 'string' && search.observe ? search.observe : undefined,
   }),
