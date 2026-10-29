@@ -28,7 +28,7 @@ async def handle(plugin_id: str, capability: str, args: Dict[str, Any]) -> Dict[
     elif capability == "personality.get_current":
         if args:
             raise ValueError("personality.get_current 不接受参数")
-        result = current_profile(global_config.personality)
+        result = current_profile(global_config.personality, global_config.chat.reply_style)
     else:
         raise ValueError(f"不支持的人设能力: {capability}")
     return {"success": True, "result": result}

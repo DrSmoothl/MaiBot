@@ -578,6 +578,28 @@ function BotConfigPageContent() {
   // 保留给后续恢复重启入口或快捷操作复用；当前页面不渲染重启按钮。
   void handleSaveAndRestart
 
+  const savePersonality = async (value: ConfigSectionData) => {
+    const { group_chat_prompt, private_chat_prompts, ...personality } = value
+    const chat = {
+      ...sectionValues.chat,
+      reply_style: {
+        ...(sectionValues.chat?.reply_style as ConfigSectionData),
+        group_chat_prompt,
+        private_chat_prompts,
+      },
+    }
+    const configToSave = { ...buildFullConfig(), personality, chat }
+    setSectionValues((current) => ({ ...current, personality, chat }))
+    // 标记两部分的待保存修订，再通过现有写入屏障一次保存，避免分区自动保存竞争。
+    triggerAutoSave('personality', personality)
+    triggerAutoSave('chat', chat)
+    try {
+      await runWithAutoSaveBarrier(() => updateBotConfig(configToSave))
+    } catch (error) {
+      toast({ title: '保存人设失败', description: (error as Error).message, variant: 'destructive' })
+    }
+  }
+
   // 根据 schema 构建 tab 分组
   const tabGroups = useMemo(() => {
     if (!configSchema) return []
@@ -891,6 +913,7 @@ function BotConfigPageContent() {
             tabGroups={tabGroups}
             sectionValues={sectionValues}
             setSectionValue={setSectionValue}
+            onPersonalityChange={savePersonality}
             setHasUnsavedChanges={setHasUnsavedChanges}
             searchFieldPath={searchFieldPath}
           />
@@ -945,6 +968,7 @@ function updateNestedValue(
 }
 
 interface DynamicConfigTabsProps {
+  onPersonalityChange: (value: ConfigSectionData) => Promise<void>
   activeTab: string
   setActiveTab: (tab: string) => void
   advancedVisible: boolean
@@ -987,6 +1011,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     sectionValues,
     setHasUnsavedChanges,
     setSectionValue,
+    onPersonalityChange,
     tabGroups,
   } = props
   const initialActiveTab = tabGroups[0]?.id ?? ''
@@ -1170,8 +1195,12 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     personality: (
       <div className="space-y-3">
         <PersonalityProfiles
-          values={sectionValues.personality ?? {}}
-          onChange={(value) => updateSectionValueByPath('personality', [], value)}
+          values={{
+            ...sectionValues.personality,
+            group_chat_prompt: (sectionValues.chat?.reply_style as ConfigSectionData)?.group_chat_prompt,
+            private_chat_prompts: (sectionValues.chat?.reply_style as ConfigSectionData)?.private_chat_prompts,
+          }}
+          onChange={(value) => { void onPersonalityChange(value) }}
         />
         {identitySchema && (
           <DynamicConfigForm

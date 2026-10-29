@@ -23,11 +23,13 @@ describe('personality import card', () => {
     expect(onChange).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
     fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '导入后编辑' } })
+    fireEvent.change(screen.getByLabelText('群聊提示词'), { target: { value: '导入群聊' } })
+    fireEvent.change(screen.getByLabelText('私聊提示词'), { target: { value: '导入私聊' } })
     expect(onChange).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '创建人设' }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       personality: '当前使用的设定', selected_profile: '',
-      profiles: [expect.objectContaining({ name: '导入后编辑' })],
+      profiles: [expect.objectContaining({ name: '导入后编辑', group_chat_prompt: '导入群聊', private_chat_prompts: '导入私聊' })],
     }))
   })
 

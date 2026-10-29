@@ -156,6 +156,10 @@ class PersonalityProfile(ConfigBase):
     """行为风格。"""
     reply_style: str
     """表达风格。"""
+    group_chat_prompt: str
+    """群聊提示词。"""
+    private_chat_prompts: str
+    """私聊提示词。"""
     multiple_reply_style: List[str] = Field(default_factory=list)
     """备用表达风格。"""
     multiple_probability: float = Field(default=0, ge=0, le=1)

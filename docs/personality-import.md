@@ -11,13 +11,15 @@ WebUI「身份与人格」→「导入」支持粘贴以下 JSON，也支持用 
     "personality": "温柔、好奇，喜欢和朋友分享日常。",
     "behavior_style": "自然参与聊天，认真倾听，不强行找话题。",
     "reply_style": "简短自然，语气温和。",
+    "group_chat_prompt": "留意群友之间的互动，适时参与，不必逐条回复。",
+    "private_chat_prompts": "关注对方的想法，保持自然连贯的一对一交流。",
     "multiple_reply_style": ["偶尔用一句俏皮话回复"],
     "multiple_probability": 0.1
   }
 }
 ```
 
-`format` 必须为 `maibot.personality`，`version` 必须为数字 `1`。`profile` 的前四个字段为必填字符串，名称不能全为空白。`multiple_reply_style` 是可选字符串数组，默认 `[]`；`multiple_probability` 是可选的 0–1 数字，默认 `0`。不接受额外字段、自动类型转换或远程资源。单份文本最多 65536 个 JavaScript 字符（UTF-16 code units）。
+`format` 必须为 `maibot.personality`，`version` 必须为数字 `1`。`profile` 的前六个字段（含群聊与私聊提示词）为必填字符串，名称不能全为空白。`multiple_reply_style` 是可选字符串数组，默认 `[]`；`multiple_probability` 是可选的 0–1 数字，默认 `0`。不接受额外字段、自动类型转换或远程资源。单份文本最多 65536 个 JavaScript 字符（UTF-16 code units）。
 
 ## 外部网页唤起接口
 

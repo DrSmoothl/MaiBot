@@ -19,6 +19,8 @@ function snapshot(values: Record<string, unknown>, name: string): Profile {
     personality: values.personality as string,
     behavior_style: values.behavior_style as string,
     reply_style: values.reply_style as string,
+    group_chat_prompt: values.group_chat_prompt as string,
+    private_chat_prompts: values.private_chat_prompts as string,
     multiple_reply_style: values.multiple_reply_style as string[],
     multiple_probability: values.multiple_probability as number,
   }
@@ -185,6 +187,7 @@ export function PersonalityProfiles({ values, onChange }: {
                 </div>
                 {([
                   ['personality', '人格设定'], ['behavior_style', '行为风格'], ['reply_style', '表达风格'],
+                  ['group_chat_prompt', '群聊提示词'], ['private_chat_prompts', '私聊提示词'],
                 ] as const).map(([field, label]) => <div key={field} className="space-y-2">
                   <Label htmlFor={'profile-' + field}>{label}</Label>
                   <Textarea id={'profile-' + field} rows={3} value={draft[field]} onChange={(event) => setDraft({ ...draft, [field]: event.target.value })} />

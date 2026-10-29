@@ -17,10 +17,15 @@ describe('personality import', () => {
     expect(profile.name).toBe('温柔的麦麦')
     expect(profile.multiple_reply_style).toEqual([])
     expect(profile.multiple_probability).toBe(0)
+    expect(profile.group_chat_prompt).toBe(data.profile.group_chat_prompt)
+    expect(profile.private_chat_prompts).toBe(data.profile.private_chat_prompts)
   })
+
 
   it.each([
     (data: ImportFixture) => { data.version = 2 },
+    (data: ImportFixture) => { delete data.profile.group_chat_prompt },
+    (data: ImportFixture) => { delete data.profile.private_chat_prompts },
     (data: ImportFixture) => { data.profile.name = ' ' },
     (data: ImportFixture) => { delete data.profile.personality },
     (data: ImportFixture) => { data.profile.multiple_probability = 2 },
@@ -28,6 +33,8 @@ describe('personality import', () => {
     (data: ImportFixture) => { data.profile.multiple_reply_style = [false] },
     (data: ImportFixture) => { data.profile.multiple_reply_style = null },
     (data: ImportFixture) => { data.profile.token = 'secret' },
+    (data: ImportFixture) => { data.profile.group_chat_prompt = null },
+    (data: ImportFixture) => { data.profile.private_chat_prompts = [] },
     (data: ImportFixture) => { data.config = {} },
   ])('rejects invalid or unexpected fields', (modify) => {
     const data = JSON.parse(PERSONALITY_IMPORT_EXAMPLE)
