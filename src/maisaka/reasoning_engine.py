@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Literal, Optional
 
 import asyncio
 import difflib
@@ -283,6 +283,7 @@ class MaisakaReasoningEngine:
         profile_message: SessionMessage,
         source_messages: list[SessionMessage],
         deferred_tools_reminder: str,
+        round_text: Optional[str] = None,
     ) -> list[str]:
         """构造本轮 planner 的一次性注入消息。"""
 
@@ -319,10 +320,26 @@ class MaisakaReasoningEngine:
                 logger.debug(f"{self._runtime.log_prefix} 图片记忆自然拉起失败，已跳过: {exc}")
                 return ""
 
+        pending = {"启发式记忆", "人物画像", "图片记忆"}
+        if round_text is not None:
+            self._runtime._update_stage_status("组织上下文", "正在准备：启发式记忆、人物画像、图片记忆", round_text=round_text)
+
+        async def measure_injection(name: str, build: Callable[[], Awaitable[Any]]) -> Any:
+            started = time.perf_counter()
+            try:
+                return await build()
+            finally:
+                elapsed = time.perf_counter() - started
+                pending.discard(name)
+                logger.info(f"{self._runtime.log_prefix} 上下文准备: {name} 耗时={elapsed:.2f}s")
+                if pending and round_text is not None:
+                    remaining = "、".join(item for item in ("启发式记忆", "人物画像", "图片记忆") if item in pending)
+                    self._runtime._update_stage_status("组织上下文", f"正在等待：{remaining}", round_text=round_text)
+
         heuristic_memory_message, profile_messages, image_memory_message = await asyncio.gather(
-            build_heuristic_memory_message(),
-            build_profile_messages(),
-            build_image_memory_message(),
+            measure_injection("启发式记忆", build_heuristic_memory_message),
+            measure_injection("人物画像", build_profile_messages),
+            measure_injection("图片记忆", build_image_memory_message),
         )
         if heuristic_memory_message:
             injected_messages.append(heuristic_memory_message)
@@ -563,24 +580,34 @@ class MaisakaReasoningEngine:
 
         planner_started_at = time.time()
         state.planner_started_at = planner_started_at
-        self._runtime._update_stage_status("组织上下文", "整理消息、参考信息与可用工具", round_text=round_text)
+        context_started = time.perf_counter()
+        self._runtime._update_stage_status("组织上下文", "正在准备：可用工具", round_text=round_text)
         action_tool_definitions, deferred_tools_reminder = await self._build_action_tool_definitions()
+        logger.info(f"{self._runtime.log_prefix} 上下文准备: 可用工具 耗时={time.perf_counter() - context_started:.2f}s")
+        self._runtime._update_stage_status("组织上下文", "正在准备：黑话参考", round_text=round_text)
+        jargon_started = time.perf_counter()
         try:
             jargon_reference_message = self._refresh_jargon_reference_message()
             if jargon_reference_message is not None:
                 logger.debug(f"{self._runtime.log_prefix} 已刷新黑话参考消息")
         except Exception as exc:
             logger.debug(f"{self._runtime.log_prefix} 黑话参考消息刷新失败，已跳过: {exc}")
+        finally:
+            logger.info(f"{self._runtime.log_prefix} 上下文准备: 黑话参考 耗时={time.perf_counter() - jargon_started:.2f}s")
         injected_user_messages = await self._build_planner_injected_user_messages(
             profile_message=trigger_message,
             source_messages=source_messages,
             deferred_tools_reminder=deferred_tools_reminder,
+            round_text=round_text,
         )
         if not resolve_enable_visual_planner():
             log_pending_image_recognition_before_text_planner(
                 self._runtime._chat_history,
                 log_prefix=self._runtime.log_prefix,
             )
+        logger.info(
+            f"{self._runtime.log_prefix} 上下文准备完成: 总耗时={time.perf_counter() - context_started:.2f}s"
+        )
         logger.info(
             f"{self._runtime.log_prefix} 开始思考 "
             f"轮次={round_index + 1} 历史消息={len(self._runtime._chat_history)}"
@@ -1946,6 +1973,7 @@ class MaisakaReasoningEngine:
             "tool_call_source": tool_call_source,
             "tool_call_source_label": tool_call_source_label,
             "success": result.success,
+            "error_message": result.error_message,
             "stop_after_execution": result.stop_after_execution,
             "duration_ms": round(duration_ms, 2),
             "summary": self._build_tool_result_summary(tool_call, result, condensed_content),
