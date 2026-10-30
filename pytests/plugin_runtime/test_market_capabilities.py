@@ -99,7 +99,8 @@ def test_market_icons_follow_download_source(catalog, information, download, pre
     }), encoding="utf-8")
     record = {**catalog["plugins"][0], "icon_url": icon, "assets": {"icon_64": icon}}
     plugins = service._catalog([record], information)
-    assert plugins[0]["assets"]["icon_64"] == prefix + resource
+    expected_resource = "main/" + resource.split("/", 1)[1] if download == "cnb" else resource
+    assert plugins[0]["assets"]["icon_64"] == prefix + expected_resource
 
 
 def test_download_source_change_rewrites_icons_from_cached_catalog(catalog, monkeypatch):
@@ -269,7 +270,7 @@ def test_readme_reads_local_without_network_and_remote_uses_only_selected_branch
     monkeypatch.setattr(documents.GitSource, "read_text", lambda url, *args: calls.append(url) or "remote")
     remote = asyncio.run(service.get_readme("a", prefer_local=False, branch="docs"))
     assert remote["content"] == "remote"
-    assert calls == ["https://raw.githubusercontent.com/test/a/docs/README.md"]
+    assert calls == [sources.GitSource.select("cnb").raw_url("test", "a", "docs", "README.md")]
     with pytest.raises(ValueError, match="匹配多个"):
         asyncio.run(service.get_readme("Plugin", prefer_local=False))
 
@@ -292,7 +293,19 @@ def test_document_remote_urls_and_refs_are_not_reconstructed_in_frontend(catalog
     monkeypatch.setattr(documents.GitSource, "read_text", lambda url, *args: calls.append(url) or "content")
     assert asyncio.run(service.get_changelog("a", prefer_local=False))["content"] == "content"
     asyncio.run(service.get_readme("a", prefer_local=False, branch="a" * 40))
-    assert calls == ["https://docs.example/changes.md", f"https://raw.githubusercontent.com/test/a/{'a' * 40}/README.md"]
+    assert calls == ["https://docs.example/changes.md", sources.GitSource.select("cnb").raw_url("test", "a", "a" * 40, "README.md")]
+
+
+def test_readme_uses_selected_download_source(catalog, monkeypatch):
+    calls = []
+    monkeypatch.setattr(documents.GitSource, "read_text", lambda url, *args: calls.append(url) or "content")
+    asyncio.run(service.get_readme("a", prefer_local=False))
+    sources.SETTINGS_FILE.write_text('{"download_source":"github"}', encoding="utf-8")
+    asyncio.run(service.get_readme("a", prefer_local=False))
+    assert calls == [
+        sources.GitSource.select("cnb").raw_url("test", "a", "main", "README.md"),
+        "https://raw.githubusercontent.com/test/a/main/README.md",
+    ]
 
 
 def test_missing_documents_and_errors_remain_distinct(catalog, monkeypatch):
