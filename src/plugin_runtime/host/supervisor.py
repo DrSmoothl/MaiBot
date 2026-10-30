@@ -44,6 +44,7 @@ from src.plugin_runtime.compat_policy import (
     build_force_plugin_compatibility_env,
     is_force_plugin_compatibility_enabled,
 )
+from src.plugin_runtime.desktop_pet_buttons import DesktopPetButtonSnapshot
 from src.plugin_runtime.local_sdk import build_pythonpath_with_local_sdk
 from src.plugin_runtime.protocol.envelope import (
     BootstrapPluginPayload,
@@ -987,6 +988,34 @@ class PluginRunnerSupervisor:
         if response.error:
             raise ValueError(str(response.error.get("message", "配置页运行时请求失败")))
         return response.payload
+
+    def get_desktop_pet_button_plugins(self) -> Dict[str, Any]:
+        """直接使用注册表生命周期；插件卸载或 Runner 退出后贡献立即消失。"""
+        return {
+            plugin_id: {"name": registration.display_name, "buttons": [button.model_dump() for button in registration.desktop_pet_buttons]}
+            for plugin_id, registration in self._registered_plugins.items()
+            if registration.desktop_pet_buttons and not registration.config_error
+        }
+
+    async def desktop_pet_buttons(self, plugin_id: str, button_id: Optional[str] = None) -> Dict[str, Any]:
+        self._ensure_accepting_runner_rpc()
+        registration = self._registered_plugins.get(plugin_id)
+        if registration is None or not registration.desktop_pet_buttons:
+            raise ValueError("插件未注册桌宠按钮")
+        if button_id is not None and button_id not in {button.id for button in registration.desktop_pet_buttons}:
+            raise ValueError("未声明的桌宠按钮")
+        response = await self._rpc_server.send_request(
+            "plugin.desktop_pet_buttons", plugin_id=plugin_id,
+            payload={"button_id": button_id}, timeout_ms=10000 if button_id else 4000,
+        )
+        if response.error:
+            raise ValueError(str(response.error.get("message", "桌宠按钮请求失败")))
+        if self._registered_plugins.get(plugin_id) is not registration:
+            raise ValueError("插件已发生卸载或重载，请重试")
+        snapshot = DesktopPetButtonSnapshot.model_validate(response.payload)
+        if snapshot.buttons != registration.desktop_pet_buttons:
+            raise ValueError("桌宠按钮声明发生变化，请重载插件")
+        return snapshot.model_dump()
 
     async def inspect_plugin_config(
         self,
