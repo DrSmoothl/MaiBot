@@ -81,6 +81,12 @@ from src.plugin_runtime.runner.plugin_paths import PluginPaths, build_plugin_pat
 from src.plugin_runtime.runner.plugin_loader import PluginCandidate, PluginLoader, PluginMeta
 from src.plugin_runtime.runner.rpc_client import RPCClient
 from src.plugin_runtime.config_widgets import ConfigWidgetProvider, invoke_widget_action, read_widget_snapshot
+from src.plugin_runtime.desktop_pet_buttons import (
+    DesktopPetButtonProvider,
+    invoke_button,
+    read_button_declarations,
+    read_button_snapshot,
+)
 from src.plugin_runtime.webui_schema import load_webui_extension
 
 logger = get_logger("plugin_runtime.runner.main")
@@ -464,6 +470,7 @@ class PluginRunner:
         self._shutting_down: bool = False
         self._reload_lock: asyncio.Lock = asyncio.Lock()
         self._config_widget_locks: Dict[str, asyncio.Lock] = {}
+        self._desktop_pet_button_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
         self._inflight_rpcs: Dict[int, InFlightRPC] = {}
 
         # IPC 日志 Handler：握手成功后安装，将所有 stdlib logging 转发到 Host
@@ -1315,6 +1322,7 @@ class PluginRunner:
         self._rpc_client.register_method("plugin.shutdown", self._handle_shutdown)
         self._rpc_client.register_method("plugin.config_updated", self._handle_config_updated)
         self._rpc_client.register_method("plugin.config_widgets", self._handle_config_widgets)
+        self._rpc_client.register_method("plugin.desktop_pet_buttons", self._handle_desktop_pet_buttons)
         self._rpc_client.register_method("plugin.inspect_config", self._handle_inspect_plugin_config)
         self._rpc_client.register_method("plugin.validate_config", self._handle_validate_plugin_config)
         self._rpc_client.register_method("plugin.reload", self._handle_reload_plugin)
@@ -1477,6 +1485,11 @@ class PluginRunner:
             logger.error(f"插件 {meta.plugin_id} WebUI 声明无效: {exc}")
             return False
 
+        try:
+            desktop_pet_buttons = [] if meta.config_error else read_button_declarations(instance)
+        except Exception:
+            logger.exception(f"插件 {meta.plugin_id} 桌宠按钮声明无效")
+            return False
         reg_payload = RegisterPluginPayload(
             plugin_id=meta.plugin_id,
             display_name=meta.manifest.name,
@@ -1491,6 +1504,7 @@ class PluginRunner:
             default_config={} if meta.config_error else self._get_plugin_default_config(instance),
             config_schema={} if meta.config_error else self._get_plugin_config_schema(meta),
             config_error=meta.config_error,
+            desktop_pet_buttons=desktop_pet_buttons,
         )
 
         try:
@@ -2480,6 +2494,39 @@ class PluginRunner:
                 return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "配置页操作超时")
             except Exception as exc:
                 return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, f"{type(exc).__name__}: {exc}")
+
+    async def _handle_desktop_pet_buttons(self, envelope: Envelope) -> Envelope:
+        """仅路由到真实加载的插件实例，同一个按钮执行中拒绝再次点击。"""
+        meta = self._loader.get_plugin(envelope.plugin_id)
+        if meta is None or meta.config_error:
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "插件未运行或配置无效")
+        button_id = envelope.payload.get("button_id")
+        if button_id is not None and (not isinstance(button_id, str) or not button_id):
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "按钮 ID 无效")
+        provider = cast(DesktopPetButtonProvider, meta.instance)
+        lock = self._desktop_pet_button_locks.setdefault((envelope.plugin_id, button_id), asyncio.Lock()) if button_id else None
+        if lock is not None and lock.locked():
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "按钮操作进行中")
+        if lock is not None:
+            await lock.acquire()
+        inflight = self._start_inflight_rpc(envelope, f"desktop_pet:{button_id or 'states'}")
+        try:
+            async with asyncio.timeout(8 if button_id else 3):
+                snapshot = await read_button_snapshot(provider)
+                if self._loader.get_plugin(envelope.plugin_id) is not meta:
+                    raise ValueError("插件已卸载或重载")
+                if button_id is not None:
+                    await invoke_button(provider, snapshot, button_id)
+                    snapshot = await read_button_snapshot(provider)
+            return envelope.make_response(payload=snapshot.model_dump())
+        except TimeoutError:
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "桌宠按钮请求超时")
+        except Exception as exc:
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, f"{type(exc).__name__}: {exc}")
+        finally:
+            self._finish_inflight_rpc(inflight)
+            if lock is not None:
+                lock.release()
 
     async def _handle_inspect_plugin_config(self, envelope: Envelope) -> Envelope:
         """处理插件配置元数据解析请求。

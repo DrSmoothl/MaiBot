@@ -1487,6 +1487,25 @@ class PluginRuntimeManager(
             raise RuntimeError("插件未运行")
         return await supervisor.config_widgets(plugin_id, action_id)
 
+    def get_desktop_pet_button_plugins(self) -> Dict[str, Any]:
+        if not self._started:
+            return {}
+        plugins: Dict[str, Any] = {}
+        for supervisor in self.supervisors:
+            for plugin_id, contribution in supervisor.get_desktop_pet_button_plugins().items():
+                if plugin_id in plugins:
+                    raise ValueError(f"桌宠按钮插件重复注册: {plugin_id}")
+                plugins[plugin_id] = contribution
+        return plugins
+
+    async def desktop_pet_buttons(self, plugin_id: str, button_id: Optional[str] = None) -> Dict[str, Any]:
+        if not self._started:
+            raise RuntimeError("插件运行时未启动")
+        supervisor = self._get_supervisor_for_plugin(plugin_id)
+        if supervisor is None:
+            raise RuntimeError("插件未运行")
+        return await supervisor.desktop_pet_buttons(plugin_id, button_id)
+
     async def inspect_plugin_config(
         self,
         plugin_id: str,

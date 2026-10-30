@@ -10,8 +10,9 @@ from typing import Any, Dict, List, Optional
 import logging as stdlib_logging
 import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from src.plugin_runtime.desktop_pet_buttons import DesktopPetButton
 from src.plugin_runtime.webui_schema import WebUIExtension
 
 
@@ -249,6 +250,16 @@ class RegisterPluginPayload(BaseModel):
     config_schema: Dict[str, Any] = Field(default_factory=dict, description="插件配置 Schema")
     """插件配置 Schema"""
     config_error: str = Field(default="", description="配置错误；非空时仅加载配置管理，不启用业务")
+    desktop_pet_buttons: List[DesktopPetButton] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_desktop_pet_buttons(self) -> "RegisterPluginPayload":
+        ids = [button.id for button in self.desktop_pet_buttons]
+        if len(ids) != len(set(ids)):
+            raise ValueError("桌宠按钮 ID 重复")
+        if self.config_error and self.desktop_pet_buttons:
+            raise ValueError("配置错误的插件不能注册桌宠按钮")
+        return self
 
 
 class BootstrapPluginPayload(BaseModel):

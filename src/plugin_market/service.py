@@ -57,7 +57,7 @@ def _release_description(entry: PluginReleaseEntry, manifest: Dict[str, Any]) ->
 
 
 def _icon_url(icon: str, target: GitSource) -> str:
-    """市场仓库图标跟随下载源，保留完整 URL 中指定的分支或提交。"""
+    """市场仓库图标跟随下载源；CNB 使用镜像的 main 分支。"""
     parsed = urlsplit(icon)
     if not parsed.scheme and not parsed.netloc:
         return target.raw_url("Mai-with-u", "plugin-repo", "main", icon)
@@ -73,7 +73,9 @@ def _icon_url(icon: str, target: GitSource) -> str:
     ref, separator, path = parsed.path[len(prefix):].partition("/")
     if not ref or not separator or not path:
         raise ValueError(f"插件市场图标 URL 缺少版本或文件路径：{icon}")
-    resolved = target.raw_url("Mai-with-u", "plugin-repo", unquote(ref), unquote(path))
+    # GitHub 的提交不一定存在于 CNB 镜像，镜像图标统一读取 main。
+    resolved_ref = "main" if target.id == "cnb" else unquote(ref)
+    resolved = target.raw_url("Mai-with-u", "plugin-repo", resolved_ref, unquote(path))
     return urlsplit(resolved)._replace(query=parsed.query, fragment=parsed.fragment).geturl()
 
 
